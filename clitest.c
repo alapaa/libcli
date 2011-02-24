@@ -46,6 +46,7 @@ struct sock_ev_client {
     struct sock_ev_serv* server;
 
     struct cli_def *cli;
+    ccrContext z;
 };
 
 int setnonblock(int fd);
@@ -61,7 +62,8 @@ static void client_cb(EV_P_ ev_io *w, int revents) {
     struct sock_ev_client* client = (struct sock_ev_client*) w;
 
     //cli_process_event(sock_ev_client *client, int revents)
-    cli_process_event(client, revents);
+    cli_process_event(client->z, client, revents);
+
 
         /* int n; */
         /* char str[100] = ".\0"; */
@@ -94,16 +96,17 @@ inline static struct sock_ev_client* client_new(int fd) {
 
     client = realloc(NULL, sizeof(struct sock_ev_client));
     client->fd = fd;
+    client->z = 0; // Re-entrant coroutine state struct
     //client->server = server;
     setnonblock(client->fd);
-    ev_io_init(&client->io, client_cb, client->fd, EV_READ);
+    ev_io_init(&client->io, client_cb, client->fd, EV_READ|EV_WRITE);
 
     return client;
 }
 
 // This callback is called when data is readable on the unix socket.
 static void server_cb(EV_P_ ev_io *w, int revents) {
-    puts("unix stream socket has become readable");
+    puts("socket has become readable");
 
     int client_fd;
     struct sock_ev_client* client;
@@ -215,7 +218,7 @@ int main(void) {
     server_init(&server, max_queue);
 
     // To be sure that we aren't actually blocking
-    ev_periodic_init(&every_few_seconds, not_blocked, 0, 5, 0);
+    ev_periodic_init(&every_few_seconds, not_blocked, 0, 5., 0);
     ev_periodic_start(EV_A_ &every_few_seconds);
 
     // Get notified whenever the socket is ready to read
@@ -228,12 +231,13 @@ int main(void) {
 
     // This point is only ever reached if the loop is manually exited
     close(server.fd);
+    cli_done(cli); // TODO: Move/change?
     return EXIT_SUCCESS;
 }
 
 
 static void not_blocked(EV_P_ ev_periodic *w, int revents) {
-  puts("I'm not blocked");
+    puts("I'm not blocked");
 }
 
 

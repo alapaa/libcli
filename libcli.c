@@ -21,6 +21,8 @@
 #endif
 #include "libcli.h"
 
+#include "coroutine.h"
+
 // vim:sw=4 ts=8
 
 #ifdef __GNUC__
@@ -1126,8 +1128,12 @@ static int show_prompt(struct cli_def *cli, int sockfd)
     return len + write(sockfd, cli->promptchar, strlen(cli->promptchar));
 }
 
-int cli_loop(struct cli_def *cli, int sockfd)
+//int cli_loop(struct cli_def *cli, int sockfd)
+// NOTE: Need to call ccrAbort to delete context var at non-normal exit,
+// see coroutine header file for more info.
+int cli_process_event(ccrContParam, sock_ev_client *client, int revents)
 {
+    ccrBeginContext;
     unsigned char c;
     int n, l, oldl = 0, is_telnet_option = 0, skip = 0, esc = 0;
     int cursor = 0, insertmode = 1;
@@ -1138,12 +1144,36 @@ int cli_loop(struct cli_def *cli, int sockfd)
         "\xFF\xFB\x01"
         "\xFF\xFD\x03"
         "\xFF\xFD\x01";
+    struct cli_def *cli = client->cli; // Legacy shorthand
+    ssize_t nwritten;
+    ssize_t nwanted;
+    ccrEndContext(loop_state);
 
+    ccrBegin(loop_state);
     cli_build_shortest(cli, cli->commands);
     cli->state = STATE_LOGIN;
 
     cli_free_history(cli);
-    write(sockfd, negotiate, strlen(negotiate));
+
+
+    nwanted = strlen(negotiate);
+    nwritten = write(sockfd, negotiate, nwanted);
+
+    if (nwritten < 0) {
+        if (errno != EWOULDBLOCK) {
+            perror("Unknown error");
+            assert(0);
+        } else {
+            fprintf(stderr, "Error, write would have blocked\n");
+            assert(0);
+        }
+    } else if (nwritten < nwanted) {
+        fprintf(stderr, "Error, only partial write. nritten %d, nwanted %d\n"
+                nwritten, nwanted);
+        assert(0);
+    }
+
+    ccrReturn(loop_state);
 
     if ((cmd = malloc(CLI_MAX_LINE_LENGTH)) == NULL)
         return CLI_ERROR;
@@ -1176,11 +1206,13 @@ int cli_loop(struct cli_def *cli, int sockfd)
     if (!cli->users && !cli->auth_callback)
         cli->state = STATE_NORMAL;
 
-    while (1)
+    while (1) // Outer while(1) loop
     {
+        ccrReturn(loop_state); // General yield, catches all breaks and
+                               // continues that end up here
+
         signed int in_history = 0;
         int lastchar = 0;
-        struct timeval tm;
 
         cli->showprompt = 1;
 
@@ -1199,12 +1231,12 @@ int cli_loop(struct cli_def *cli, int sockfd)
             cursor = 0;
         }
 
-        memcpy(&tm, &cli->timeout_tm, sizeof(tm));
+        //memcpy(&tm, &cli->timeout_tm, sizeof(tm));
 
-        while (1)
+        while (1) // Inner while(1) loop
         {
-            int sr;
-            fd_set r;
+            ccrReturn(loop_state); // General yield, will yield after all
+                                   // continue statements that take us here
             if (cli->showprompt)
             {
                 if (cli->state != STATE_PASSWORD && cli->state != STATE_ENABLE_PASSWORD)
@@ -1239,58 +1271,16 @@ int cli_loop(struct cli_def *cli, int sockfd)
                 }
 
                 cli->showprompt = 0;
+                ccrReturn(loop_state); // yield...
             }
 
-            FD_ZERO(&r);
-            FD_SET(sockfd, &r);
 
-            if ((sr = select(sockfd + 1, &r, NULL, NULL, &tm)) < 0)
-            {
-                /* select error */
-                if (errno == EINTR)
-                    continue;
-
-                perror("select");
-                l = -1;
-                break;
-            }
-
-            if (sr == 0)
-            {
-                /* timeout every second */
-                if (cli->regular_callback && cli->regular_callback(cli) != CLI_OK)
-                {
-                    l = -1;
-                    break;
-                }
-
-                if (cli->idle_timeout)
-                {
-                    if (time(NULL) - cli->last_action >= cli->idle_timeout)
-                    {
-                        if (cli->idle_timeout_callback)
-                        {
-                            // Call the callback and continue on if successful
-                            if (cli->idle_timeout_callback(cli) == CLI_OK)
-                            {
-                                // Reset the idle timeout counter
-                                time(&cli->last_action);
-                                continue;
-                            }
-                        }
-                        // Otherwise, break out of the main loop
-                        l = -1;
-                        break;
-                    }
-                }
-
-                memcpy(&tm, &cli->timeout_tm, sizeof(tm));
-                continue;
-            }
+            /* TODO: Removed regular callback and idle timeout callback.
+               Add as libev timer callbacks instead */
 
             if ((n = read(sockfd, &c, 1)) < 0)
             {
-                if (errno == EINTR)
+                if (errno == EINTR) // Interrupted by signal
                     continue;
 
                 perror("read");
@@ -1298,8 +1288,8 @@ int cli_loop(struct cli_def *cli, int sockfd)
                 break;
             }
 
-            if (cli->idle_timeout)
-                time(&cli->last_action);
+            //if (cli->idle_timeout)
+            //    time(&cli->last_action);
 
             if (n == 0)
             {
@@ -1423,7 +1413,7 @@ int cli_loop(struct cli_def *cli, int sockfd)
                 {
                     if (l == 0 || cursor == 0)
                     {
-                        write(sockfd, "\a", 1);
+                        write(sockfd, "\a", 1); // alert (BEL) character
                         continue;
                     }
 
@@ -1771,7 +1761,7 @@ int cli_loop(struct cli_def *cli, int sockfd)
             oldcmd = 0;
             oldl = 0;
             lastchar = c;
-        }
+        } // End of inner while(1) loop
 
         if (l < 0) break;
 
@@ -1870,7 +1860,7 @@ int cli_loop(struct cli_def *cli, int sockfd)
         // long time to return
         if (cli->idle_timeout)
             time(&cli->last_action);
-    }
+    } // End of outer while(1) loop
 
     cli_free_history(cli);
     free_z(username);
@@ -1922,7 +1912,7 @@ int cli_file(struct cli_def *cli, FILE *fh, int privilege, int mode)
     cli_set_privilege(cli, oldpriv);
     cli_set_configmode(cli, oldmode, NULL /* didn't save desc */);
 
-    return CLI_OK;
+    ccrFinish(CLI_OK);
 }
 
 static void _print(struct cli_def *cli, int print_mode, char *format, va_list ap)
