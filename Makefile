@@ -21,7 +21,7 @@ LDFLAGS += -Wl,-soname,$(LIB).$(MAJOR).$(MINOR)
 LIBS = -lcrypt
 endif
 
-all: $(LIB) clitest
+all: $(LIB) clitest libcli.a
 
 $(LIB): libcli.o
 	$(CC) -o $(LIB).$(MAJOR).$(MINOR).$(REVISION) $^ $(LDFLAGS) $(LIBS)
@@ -29,19 +29,23 @@ $(LIB): libcli.o
 	ln -s $(LIB).$(MAJOR).$(MINOR).$(REVISION) $(LIB).$(MAJOR).$(MINOR)
 	ln -s $(LIB).$(MAJOR).$(MINOR) $(LIB)
 
+libcli.a: libcli.o
+	ar r $@ $^
+
 %.o: %.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -o $@ -c $<
 
 libcli.o: libcli.h
 
-clitest: clitest.o $(LIB)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $< -L. -lcli
+clitest: clitest.o array-heap.o $(LIB) libcli.a
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $< array-heap.o -L. libcli.a -lcrypt -lev
+#	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $< array-heap.o -L. -lcli -lev
 
 clitest.exe: clitest.c libcli.o
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $< libcli.o -lws2_32
 
 clean:
-	rm -f *.o $(LIB)* clitest
+	rm -f *.o $(LIB)* clitest *.a
 
 install: $(LIB)
 	install -d $(DESTDIR)$(PREFIX)/include $(DESTDIR)$(PREFIX)/lib

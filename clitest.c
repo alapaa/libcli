@@ -19,6 +19,7 @@
 
 #include <ev.h>
 
+#include "coroutine.h"
 #include "array-heap.h"
 // End includes from unix echo server code
 
@@ -34,7 +35,7 @@
 struct sock_ev_serv {
     ev_io io;
     int fd;
-    struct sockaddr_un socket;
+    struct sockaddr_in addr;
     int socket_len;
     array clients;
 };
@@ -54,6 +55,8 @@ static void not_blocked(EV_P_ ev_periodic *w, int revents);
 
 unsigned int regular_count = 0;
 unsigned int debug_regular = 0;
+
+struct cli_def *cli;
 //------------
 // This callback is called when client data is available
 static void client_cb(EV_P_ ev_io *w, int revents) {
@@ -62,7 +65,7 @@ static void client_cb(EV_P_ ev_io *w, int revents) {
     struct sock_ev_client* client = (struct sock_ev_client*) w;
 
     //cli_process_event(sock_ev_client *client, int revents)
-    cli_process_event(client->z, client, revents);
+    cli_process_event(&client->z, client->cli, client->fd, revents);
 
 
         /* int n; */
@@ -97,6 +100,7 @@ inline static struct sock_ev_client* client_new(int fd) {
     client = realloc(NULL, sizeof(struct sock_ev_client));
     client->fd = fd;
     client->z = 0; // Re-entrant coroutine state struct
+    client->cli = cli; // TODO: remove global?
     //client->server = server;
     setnonblock(client->fd);
     ev_io_init(&client->io, client_cb, client->fd, EV_READ|EV_WRITE);
@@ -123,7 +127,7 @@ static void server_cb(EV_P_ ev_io *w, int revents) {
         {
             if( errno != EAGAIN && errno != EWOULDBLOCK )
             {
-                g_warning("accept() failed errno=%i (%s)",  errno, strerror(errno));
+                printf("accept() failed errno=%i (%s)",  errno, strerror(errno));
                 exit(EXIT_FAILURE);
             }
             break;
@@ -146,17 +150,19 @@ int setnonblock(int fd)
     return fcntl(fd, F_SETFL, flags);
 }
 
-int socket_init(struct sockaddr_un* socket_un, int max_queue) {
+int socket_init(struct sockaddr_in* addr, int max_queue)
+{
     int fd;
+    int on = 1;
 
     // Setup a socket listener.
 
-    if ((fd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+    if ((fd = socket(addr->sin_family, SOCK_STREAM, 0)) < 0)
     {
         perror("socket");
         exit(EXIT_FAILURE);
     }
-    setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
 
 
     // Set it non-blocking
@@ -165,26 +171,17 @@ int socket_init(struct sockaddr_un* socket_un, int max_queue) {
         exit(EXIT_FAILURE);
     }
 
-    // Set it as unix socket
-    socket_un->sun_family = AF_INET;
-    //strcpy(socket_un->sun_path, sock_path);
-
-    return fd;
+   return fd;
 }
 
 int server_init(struct sock_ev_serv* server, int max_queue) {
-    server->fd = socket_init(&server->socket, max_queue);
+    server->fd = socket_init(&server->addr, max_queue);
     //server->socket_len = sizeof(server->socket.sun_family) + strlen(server->socket.sun_path);
-    server->socket_len = sizeof(server->socket.sun_family));
+    server->socket_len = sizeof(server->addr);
 
     array_init(&server->clients, 128);
 
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    addr.sin_port = htons(CLITEST_PORT);
-
-    if (-1 == bind(server->fd, (struct sockaddr*) &server->socket, server->socket_len))
+    if (-1 == bind(server->fd, (struct sockaddr*) &server->addr, server->socket_len))
     {
       perror("echo server bind");
       exit(EXIT_FAILURE);
@@ -215,10 +212,16 @@ int main(void) {
 
     // Create unix socket in non-blocking fashion
     //server_init(&server, "/tmp/libev-echo.sock", max_queue);
+
+    memset(&server.addr, 0, sizeof(server.addr));
+    server.addr.sin_family = AF_INET;
+    server.addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    server.addr.sin_port = htons(CLITEST_PORT);
+
     server_init(&server, max_queue);
 
     // To be sure that we aren't actually blocking
-    ev_periodic_init(&every_few_seconds, not_blocked, 0, 5., 0);
+    ev_periodic_init(&every_few_seconds, not_blocked, 0, 20., 0);
     ev_periodic_start(EV_A_ &every_few_seconds);
 
     // Get notified whenever the socket is ready to read
@@ -371,11 +374,6 @@ void pc(UNUSED(struct cli_def *cli), char *string)
 int setup_cli()
 {
     struct cli_command *c;
-    struct cli_def *cli;
-    int s, x;
-    struct sockaddr_in addr;
-    int on = 1;
-
 
     signal(SIGCHLD, SIG_IGN);
 
@@ -444,37 +442,4 @@ int setup_cli()
     return 0;
 }
 
-//-- old main
-int old_main()
-{
-
-
-    while ((x = accept(s, NULL, 0)))
-    {
-        int pid = fork();
-        if (pid < 0)
-        {
-            perror("fork");
-            return 1;
-        }
-
-        /* parent */
-        if (pid > 0)
-        {
-            socklen_t len = sizeof(addr);
-            if (getpeername(x, (struct sockaddr *) &addr, &len) >= 0)
-                printf(" * accepted connection from %s\n", inet_ntoa(addr.sin_addr));
-
-            close(x);
-            continue;
-        }
-
-        /* child */
-        close(s);
-        cli_loop(cli, x);
-        exit(0);
-    }
-
-    cli_done(cli);
-    return 0;
-}
+// TODO: Call cli_done?
