@@ -1135,9 +1135,11 @@ static int show_prompt(struct cli_def *cli, int sockfd)
 //int cli_loop(struct cli_def *cli, int sockfd)
 // NOTE: Need to call ccrAbort to delete context var at non-normal exit,
 // see coroutine header file for more info.
-int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd, int revents)
+int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
+                      EV_P_ ev_io *io, int revents)
 {
-    // TODO: Move all vars into ccr context
+    // TODO: Move all vars into ccr context. UPDATE: Most vars moved, check if
+    // more moves necessary
 
     ccrBeginContext;
     unsigned char c;
@@ -1161,8 +1163,9 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd, int revents
     ccrEndContext(ccrs); // ccrs; Concurrent Co-Routine State
 
 
-
+    int retval = CLI_UNINITIALIZED;
     ccrBegin(ccrs);
+
     /* fprintf(stdout, "F: %s, L: %d, Got revents, EV_READ: %d, EV_WRITE: %d\n", */
     /*         __FILE__, */
     /*         __LINE__, */
@@ -1362,7 +1365,9 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd, int revents
             if (ccrs->n == 0)
             {
                 ccrs->l = -1;
-                break;
+                printf("Setting retval to %d\n", CLI_QUIT);
+                retval = CLI_QUIT;
+                goto CCR_FINISH;
             }
 
             if (ccrs->skip)
@@ -1974,8 +1979,12 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd, int revents
 
     fclose(cli->client);
     cli->client = 0;
+    retval = CLI_OK;
 
-    ccrFinish(CLI_OK);
+CCR_FINISH:
+    assert(retval != CLI_UNINITIALIZED);
+    printf("Calling ccrFinish(), retval %d\n", retval);
+    ccrFinish(retval);
 }
 
 int cli_file(struct cli_def *cli, FILE *fh, int privilege, int mode)

@@ -18,6 +18,7 @@
 #include <sys/un.h>
 
 #include <ev.h>
+#include <assert.h>
 
 #include "coroutine.h"
 #include "array-heap.h"
@@ -56,17 +57,26 @@ static void not_blocked(EV_P_ ev_periodic *w, int revents);
 unsigned int regular_count = 0;
 unsigned int debug_regular = 0;
 
-struct cli_def *cli;
 //------------
 // This callback is called when client data is available
 static void client_cb(EV_P_ ev_io *w, int revents) {
     // a client has become readable
+    int retval = CLI_UNINITIALIZED;
 
     struct sock_ev_client* client = (struct sock_ev_client*) w;
 
     //cli_process_event(sock_ev_client *client, int revents)
-    cli_process_event(&client->z, client->cli, client->fd, revents);
+    retval = cli_process_event(&client->z, client->cli, client->fd,
+                               EV_A_ &client->io, revents);
 
+    if (retval == CLI_QUIT) {
+        // Do cleanup
+
+        puts("Got CLI_QUIT, orderly disconnect");
+        ev_io_stop(EV_A_ &client->io);
+        close(client->fd);
+    }
+}
 
         /* int n; */
         /* char str[100] = ".\0"; */
@@ -92,15 +102,22 @@ static void client_cb(EV_P_ ev_io *w, int revents) {
         /* if (send(client->fd, str, n, 0) < 0) { */
         /*   perror("send"); */
         /* } */
-        }
 
+
+int setup_cli(struct cli_def **cli_def);
 inline static struct sock_ev_client* client_new(int fd) {
     struct sock_ev_client* client;
 
     client = realloc(NULL, sizeof(struct sock_ev_client));
     client->fd = fd;
     client->z = 0; // Re-entrant coroutine state struct
-    client->cli = cli; // TODO: remove global?
+
+    int result = setup_cli(&client->cli);
+    if (result < 0 || !client->cli) {
+        perror("CLI setup failed");
+        exit(EXIT_FAILURE);
+    }
+
     //client->server = server;
     setnonblock(client->fd);
     ev_io_init(&client->io, client_cb, client->fd, EV_READ|EV_WRITE);
@@ -132,7 +149,15 @@ static void server_cb(EV_P_ ev_io *w, int revents) {
             }
             break;
         }
-        puts("accepted a client");
+        struct sockaddr_in remote_addr;
+        socklen_t len = sizeof(remote_addr);
+        if (getpeername(client_fd, (struct sockaddr *)&remote_addr, &len)
+            >= 0)
+        {
+            printf(" * accepted connection from %s\n",
+                   inet_ntoa(remote_addr.sin_addr));
+        }
+
         client = client_new(client_fd);
         client->server = server;
         client->index = array_push(&server->clients, client);
@@ -201,12 +226,6 @@ int main(void) {
     struct sock_ev_serv server;
     struct ev_periodic every_few_seconds;
 
-    int result = setup_cli();
-    if (result < 0) {
-        perror("CLI setup failed");
-        exit(EXIT_FAILURE);
-    }
-
     // Create our single-loop for this single-thread application
     EV_P  = ev_default_loop(0);
 
@@ -229,18 +248,18 @@ int main(void) {
     ev_io_start(EV_A_ &server.io);
 
     // Run our loop, ostensibly forever
-    puts("tcp-socket-echo starting...\n");
+    puts("starting event loop ...\n");
     ev_loop(EV_A_ 0);
 
     // This point is only ever reached if the loop is manually exited
     close(server.fd);
-    cli_done(cli); // TODO: Move/change?
+    //cli_done(cli); // TODO: Move/change?
     return EXIT_SUCCESS;
 }
 
 
 static void not_blocked(EV_P_ ev_periodic *w, int revents) {
-    puts("I'm not blocked");
+    puts("...\n");
 }
 
 
@@ -371,13 +390,16 @@ void pc(UNUSED(struct cli_def *cli), char *string)
     printf("%s\n", string);
 }
 
-int setup_cli()
+int setup_cli(struct cli_def **cli_def)
 {
     struct cli_command *c;
 
     signal(SIGCHLD, SIG_IGN);
 
-    cli = cli_init();
+    *cli_def = cli_init();
+    assert(*cli_def);
+    struct cli_def *cli = *cli_def; // Legacy alias
+
     cli_set_banner(cli, "libcli test environment");
     cli_set_hostname(cli, "router");
     //cli_regular(cli, regular_callback);

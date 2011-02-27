@@ -8,13 +8,15 @@ extern "C" {
 #include <stdio.h>
 #include <stdarg.h>
 
+#include <ev.h>
+
 #include "coroutine.h"
 
 #define CLI_OK			0
 #define CLI_ERROR		-1
 #define CLI_QUIT		-2
 #define CLI_ERROR_ARG		-3
-
+#define CLI_UNINITIALIZED       -4
 #define MAX_HISTORY		256
 
 #define PRIVILEGE_UNPRIVILEGED	0
@@ -88,7 +90,8 @@ struct cli_command *cli_register_command(struct cli_def *cli, struct cli_command
 int cli_unregister_command(struct cli_def *cli, char *command);
 int cli_run_command(struct cli_def *cli, char *command);
 //int cli_loop(struct cli_def *cli, int sockfd);
-    int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd, int revents);
+int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
+                      EV_P_ ev_io *io, int revents);
 int cli_file(struct cli_def *cli, FILE *fh, int privilege, int mode);
 void cli_set_auth_callback(struct cli_def *cli, int (*auth_callback)(char *, char *));
 void cli_set_enable_callback(struct cli_def *cli, int (*enable_callback)(char *));
