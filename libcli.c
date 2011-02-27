@@ -1223,18 +1223,18 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
     /*         revents & EV_WRITE); */
 
     if ((ccrs->cmd = malloc(CLI_MAX_LINE_LENGTH)) == NULL)
-        return CLI_ERROR;
+        ccrReturn(CLI_ERROR);
 
 #ifdef WIN32
     /*
      * OMG, HACK
      */
     if (!(cli->client = fdopen(_open_osfhandle(sockfd,0), "w+")))
-        return CLI_ERROR;
+        ccrReturn(CLI_ERROR);
     cli->client->_file = sockfd;
 #else
     if (!(cli->client = fdopen(sockfd, "w+")))
-        return CLI_ERROR;
+        ccrReturn(CLI_ERROR);
 #endif
 
     setbuf(cli->client, NULL);
@@ -1356,7 +1356,7 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
 
                 perror("read");
                 ccrs->l = -1;
-                break;
+                ccrReturn(CLI_ERROR);
             }
 
             //if (cli->idle_timeout)
@@ -1881,7 +1881,7 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
             /* require login */
             free_z(ccrs->username);
             if (!(ccrs->username = strdup(ccrs->cmd)))
-                return 0;
+                ccrReturn(CLI_ERROR);
             cli->state = STATE_PASSWORD;
             cli->showprompt = 1;
         }
@@ -1892,7 +1892,7 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
 
             free_z(ccrs->password);
             if (!(ccrs->password = strdup(ccrs->cmd)))
-                return 0;
+                ccrReturn(CLI_ERROR);
             if (cli->auth_callback)
             {
                 if (cli->auth_callback(ccrs->username, ccrs->password) == CLI_OK)
@@ -1959,11 +1959,16 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
         else
         {
             if (ccrs->l == 0) continue;
-            if (ccrs->cmd[ccrs->l - 1] != '?' && strcasecmp(ccrs->cmd, "history") != 0)
+            if (ccrs->cmd[ccrs->l - 1] != '?' &&
+                strcasecmp(ccrs->cmd, "history") != 0)
+            {
                 cli_add_history(cli, ccrs->cmd);
-
-            if (cli_run_command(cli, ccrs->cmd) == CLI_QUIT)
+            }
+            if (cli_run_command(cli, ccrs->cmd) == CLI_QUIT) {
+                fprintf(stderr, "cli_run_command() returned CLI_QUIT\n");
+                retval = CLI_QUIT;
                 break;
+            }
         }
 
         // Update the last_action time now as the last command run could take a
@@ -1979,7 +1984,11 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
 
     fclose(cli->client);
     cli->client = 0;
-    retval = CLI_OK;
+    if (retval == CLI_UNINITIALIZED) {
+        fprintf(stderr, "Got to end of cli processing, "
+               "retval was CLI_UNINITIALIZED...\n");
+        retval = CLI_ERROR;
+    }
 
 CCR_FINISH:
     assert(retval != CLI_UNINITIALIZED);
