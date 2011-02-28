@@ -466,4 +466,3 @@ int setup_cli(struct cli_def **cli_def)
     return 0;
 }
 
-// TODO: Call cli_done?

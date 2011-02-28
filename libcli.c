@@ -1108,7 +1108,7 @@ static int pass_matches(char *pass, char *try)
 
 #ifndef WIN32
     /*
-     * TODO - find a small crypt(3) function for use on windows
+     * oldtodo(windows...) - find a small crypt(3) function for use on windows
      */
     if (des || !strncmp(pass, MD5_PREFIX, sizeof(MD5_PREFIX)-1))
         try = crypt(try, pass);
