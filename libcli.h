@@ -114,13 +114,13 @@ int cli_done(struct cli_def *cli);
  *
  * When the command has been entered by the user, callback
  * is checked. If it is not NULL, then the callback is called with:
- * 	struct cli_def * - the handle of the cli structure.  This
- * 	must be passed to all cli functions, including
- * 	cli_print().
- * 	char * - the entire command which was entered.  This is after command
- * 	expansion.
- * 	char ** - the list of arguments entered
- * 	int - the number of arguments entered
+ * 	struct cli_def *   the handle of the cli structure.  This
+ * 	                   must be passed to all cli functions, including
+ * 	                   cli_print().
+ * 	char *             the entire command which was entered. This is after
+ *                         command expansion.
+ * 	char **            the list of arguments entered
+ * 	int                the number of arguments entered
  *
  * The callback must return CLI_OK if the command was successful, CLI_ERROR if
  * processing wasn't successful and the next matching command should be tried
