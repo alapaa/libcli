@@ -51,6 +51,7 @@ struct sock_ev_client {
     ccrContext z;
 };
 
+
 int setnonblock(int fd);
 static void not_blocked(EV_P_ ev_periodic *w, int revents);
 
@@ -65,7 +66,6 @@ static void client_cb(EV_P_ ev_io *w, int revents) {
 
     struct sock_ev_client* client = (struct sock_ev_client*) w;
 
-    //cli_process_event(sock_ev_client *client, int revents)
     retval = cli_process_event(&client->z, client->cli, client->fd,
                                EV_A_ &client->io, revents);
 

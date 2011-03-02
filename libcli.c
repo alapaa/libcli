@@ -40,6 +40,8 @@
  * Stupid windows has multiple namespaces for filedescriptors, with different
  * read/write functions required for each ..
  */
+
+
 int read(int fd, void *buf, unsigned int count) {
     return recv(fd, buf, count, 0);
 }
@@ -240,22 +242,22 @@ void cli_deny_user(struct cli_def *cli, char *username)
 void cli_set_banner(struct cli_def *cli, char *banner)
 {
     free_z(cli->banner);
-    if (banner && *banner)
+    if (banner && *banner) {
         cli->banner = strdup(banner);
-
-    if (!cli->banner) {
-        exit(EXIT_FAILURE);
+        if (!cli->banner) {
+            exit(EXIT_FAILURE);
+        }
     }
 }
 
 void cli_set_hostname(struct cli_def *cli, char *hostname)
 {
     free_z(cli->hostname);
-    if (hostname && *hostname)
+    if (hostname && *hostname) {
         cli->hostname = strdup(hostname);
-
-    if (!cli->hostname) {
-        exit(EXIT_FAILURE);
+        if (!cli->hostname) {
+            exit(EXIT_FAILURE);
+        }
     }
 }
 
@@ -327,11 +329,11 @@ int cli_set_privilege(struct cli_def *cli, int priv)
 void cli_set_modestring(struct cli_def *cli, char *modestring)
 {
     free_z(cli->modestring);
-    if (modestring)
+    if (modestring) {
         cli->modestring = strdup(modestring);
-
-    if (!cli->modestring) {
-        exit(EXIT_FAILURE);
+        if (modestring && !cli->modestring) {
+            exit(EXIT_FAILURE);
+        }
     }
 }
 
@@ -1160,8 +1162,7 @@ static int show_prompt(struct cli_def *cli, int sockfd)
     return len + write(sockfd, cli->promptchar, strlen(cli->promptchar));
 }
 
-//int cli_loop(struct cli_def *cli, int sockfd)
-// NOTE: Need to call ccrAbort to delete context var at non-normal exit,
+// TODO: Need to call ccrAbort to delete context var at non-normal exit,
 // see coroutine header file for more info.
 int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
                       EV_P_ ev_io *io, int revents)
@@ -1325,11 +1326,12 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
             ccrReturn(CLI_OK); // General yield, will yield after all
                                // continue statements that take us here
 
-            /* fprintf(stdout, "(inner while()) F: %s, L: %d, Got revents, EV_READ: %d, EV_WRITE: %d\n", */
-            /* __FILE__, */
-            /* __LINE__, */
-            /* revents & EV_READ, */
-            /* revents & EV_WRITE); */
+            /* fprintf(stdout, "(inner while()) F: %s, L: %d, Got revents, " */
+            /*         "EV_READ: %d, EV_WRITE: %d\n", */
+            /*         __FILE__, */
+            /*         __LINE__, */
+            /*         revents & EV_READ, */
+            /*         revents & EV_WRITE); */
 
             if (cli->showprompt)
             {
