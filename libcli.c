@@ -180,7 +180,7 @@ void cli_allow_user(struct cli_def *cli, char *username, char *password)
     if (!(n = malloc(sizeof(struct unp))))
     {
         fprintf(stderr, "Couldn't allocate memory for user: %s", strerror(errno));
-        return;
+        exit(EXIT_FAILURE);
     }
     if (!(n->username = strdup(username)))
     {
@@ -706,8 +706,11 @@ static int cli_parse_line(char *line, char *words[], int max_words)
             if (word_start)
             {
                 int len = p - word_start;
-
-                memcpy(words[nwords] = malloc(len + 1), word_start, len);
+                words[nwords] = malloc(len + 1);
+                if (!words[nwords]) {
+                    exit(EXIT_FAILURE);
+                }
+                memcpy(words[nwords], word_start, len);
                 words[nwords++][len] = 0;
             }
 
@@ -761,6 +764,9 @@ static char *join_words(int argc, char **argv)
     }
 
     p = malloc(len + 1);
+    if (!p) {
+        exit(EXIT_FAILURE);
+    }
     p[0] = 0;
 
     for (i = 0; i < argc; i++)
