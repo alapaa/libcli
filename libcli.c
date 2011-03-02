@@ -186,14 +186,14 @@ void cli_allow_user(struct cli_def *cli, char *username, char *password)
     {
         fprintf(stderr, "Couldn't allocate memory for username: %s", strerror(errno));
         free(n);
-        return;
+        exit(EXIT_FAILURE);
     }
     if (!(n->password = strdup(password)))
     {
         fprintf(stderr, "Couldn't allocate memory for password: %s", strerror(errno));
         free(n->username);
         free(n);
-        return;
+        exit(EXIT_FAILURE);
     }
     n->next = NULL;
 
@@ -212,6 +212,7 @@ void cli_allow_enable(struct cli_def *cli, char *password)
     if (!(cli->enable_password = strdup(password)))
     {
         fprintf(stderr, "Couldn't allocate memory for enable password: %s", strerror(errno));
+        exit(EXIT_FAILURE);
     }
 }
 
@@ -241,6 +242,10 @@ void cli_set_banner(struct cli_def *cli, char *banner)
     free_z(cli->banner);
     if (banner && *banner)
         cli->banner = strdup(banner);
+
+    if (!cli->banner) {
+        exit(EXIT_FAILURE);
+    }
 }
 
 void cli_set_hostname(struct cli_def *cli, char *hostname)
@@ -248,12 +253,20 @@ void cli_set_hostname(struct cli_def *cli, char *hostname)
     free_z(cli->hostname);
     if (hostname && *hostname)
         cli->hostname = strdup(hostname);
+
+    if (!cli->hostname) {
+        exit(EXIT_FAILURE);
+    }
 }
 
 void cli_set_promptchar(struct cli_def *cli, char *promptchar)
 {
     free_z(cli->promptchar);
     cli->promptchar = strdup(promptchar);
+
+    if (!cli->promptchar) {
+        exit(EXIT_FAILURE);
+    }
 }
 
 static int cli_build_shortest(struct cli_def *cli, struct cli_command *commands)
@@ -316,6 +329,10 @@ void cli_set_modestring(struct cli_def *cli, char *modestring)
     free_z(cli->modestring);
     if (modestring)
         cli->modestring = strdup(modestring);
+
+    if (!cli->modestring) {
+        exit(EXIT_FAILURE);
+    }
 }
 
 int cli_set_configmode(struct cli_def *cli, int mode, char *config_desc)
@@ -359,14 +376,16 @@ struct cli_command *cli_register_command(struct cli_def *cli,
 
     c->callback = callback;
     c->next = NULL;
-    if (!(c->command = strdup(command)))
-        return NULL;
+    if (!(c->command = strdup(command))) {
+        exit(EXIT_FAILURE);
+    }
     c->parent = parent;
     c->privilege = privilege;
     c->mode = mode;
     if (help)
-        if (!(c->help = strdup(help)))
-            return NULL;
+        if (!(c->help = strdup(help))) {
+            exit(EXIT_FAILURE);
+        }
 
     if (parent)
     {
@@ -637,8 +656,9 @@ static int cli_add_history(struct cli_def *cli, char *cmd)
         if (!cli->history[i])
         {
             if (i == 0 || strcasecmp(cli->history[i-1], cmd))
-            if (!(cli->history[i] = strdup(cmd)))
-                return CLI_ERROR;
+            if ( !(cli->history[i] = strdup(cmd)) ) {
+                exit(EXIT_FAILURE);
+            }
             return CLI_OK;
         }
     }
@@ -646,8 +666,9 @@ static int cli_add_history(struct cli_def *cli, char *cmd)
     free(cli->history[0]);
     for (i = 0; i < MAX_HISTORY-1; i++)
         cli->history[i] = cli->history[i+1];
-    if (!(cli->history[MAX_HISTORY - 1] = strdup(cmd)))
-        return CLI_ERROR;
+    if (!(cli->history[MAX_HISTORY - 1] = strdup(cmd))) {
+        exit(EXIT_FAILURE);
+    }
     return CLI_OK;
 }
 
@@ -710,8 +731,9 @@ static int cli_parse_line(char *line, char *words[], int max_words)
             {
                 if (*p == '|')
                 {
-                    if (!(words[nwords++] = strdup("|")))
-                        return 0;
+                    if (!(words[nwords++] = strdup("|"))) {
+                        exit(EXIT_FAILURE);
+                    }
                 }
                 else if (!isspace(*p))
                     word_start = p;
@@ -1187,6 +1209,9 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
         "\xFF\xFB\x01"
         "\xFF\xFD\x03"
         "\xFF\xFD\x01");
+    if (!ccrs->negotiate) {
+        exit(EXIT_FAILURE);
+    }
 
     ccrs->nwanted = 0;
     ccrs->nwritten = 0;
@@ -1222,19 +1247,21 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
     /*         revents & EV_READ, */
     /*         revents & EV_WRITE); */
 
-    if ((ccrs->cmd = malloc(CLI_MAX_LINE_LENGTH)) == NULL)
-        ccrReturn(CLI_ERROR);
+    if ((ccrs->cmd = malloc(CLI_MAX_LINE_LENGTH)) == NULL) {
+        exit(EXIT_FAILURE);
+    }
+
 
 #ifdef WIN32
     /*
      * OMG, HACK
      */
     if (!(cli->client = fdopen(_open_osfhandle(sockfd,0), "w+")))
-        ccrReturn(CLI_ERROR);
+        ccrReturn(CLI_QUIT);
     cli->client->_file = sockfd;
 #else
     if (!(cli->client = fdopen(sockfd, "w+")))
-        ccrReturn(CLI_ERROR);
+        ccrReturn(CLI_QUIT);
 #endif
 
     setbuf(cli->client, NULL);
@@ -1356,7 +1383,7 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
 
                 perror("read");
                 ccrs->l = -1;
-                ccrReturn(CLI_ERROR);
+                ccrReturn(CLI_QUIT);
             }
 
             //if (cli->idle_timeout)
@@ -1880,8 +1907,9 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
 
             /* require login */
             free_z(ccrs->username);
-            if (!(ccrs->username = strdup(ccrs->cmd)))
-                ccrReturn(CLI_ERROR);
+            if (!(ccrs->username = strdup(ccrs->cmd))) {
+                exit(EXIT_FAILURE);
+            }
             cli->state = STATE_PASSWORD;
             cli->showprompt = 1;
         }
@@ -1891,8 +1919,9 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
             int allowed = 0;
 
             free_z(ccrs->password);
-            if (!(ccrs->password = strdup(ccrs->cmd)))
-                ccrReturn(CLI_ERROR);
+            if (!(ccrs->password = strdup(ccrs->cmd))) {
+                  ccrReturn(CLI_QUIT);
+            }
             if (cli->auth_callback)
             {
                 if (cli->auth_callback(ccrs->username, ccrs->password) == CLI_OK)
@@ -1962,7 +1991,10 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
             if (ccrs->cmd[ccrs->l - 1] != '?' &&
                 strcasecmp(ccrs->cmd, "history") != 0)
             {
-                cli_add_history(cli, ccrs->cmd);
+                retval = cli_add_history(cli, ccrs->cmd);
+                if (retval != CLI_OK) {
+                    break;
+                }
             }
             if (cli_run_command(cli, ccrs->cmd) == CLI_QUIT) {
                 fprintf(stderr, "cli_run_command() returned CLI_QUIT\n");
@@ -1987,7 +2019,7 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
     if (retval == CLI_UNINITIALIZED) {
         fprintf(stderr, "Got to end of cli processing, "
                "retval was CLI_UNINITIALIZED...\n");
-        retval = CLI_ERROR;
+        retval = CLI_QUIT;
     }
 
 CCR_FINISH:
@@ -2295,7 +2327,7 @@ int cli_range_filter_init(struct cli_def *cli, int argc, char **argv, struct cli
         }
 
         if (!(from = strdup(argv[1])))
-            return CLI_ERROR;
+            exit(EXIT_FAILURE);
         to = join_words(argc-2, argv+2);
     }
     else // begin
