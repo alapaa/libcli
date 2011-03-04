@@ -59,11 +59,16 @@ unsigned int debug_regular = 0;
 //------------
 // This callback is called when client data is available
 static void client_cb(EV_P_ ev_io *w, int revents) {
-    // a client has become readable
+    // a client has become readable or writable
     int retval = CLI_UNINITIALIZED;
 
     struct sock_ev_client* client = (struct sock_ev_client*) w;
     client->cli->revents = revents;
+
+    if (revents & EV_WRITE) printf("w");
+    if (revents & EV_READ) printf("R");
+    printf(".");
+    fflush(stdout);
 
     retval = cli_process_event(client->cli);
 
@@ -75,6 +80,11 @@ static void client_cb(EV_P_ ev_io *w, int revents) {
         close(client->cli->fd);
         cli_done(client->cli);
         free(client);
+    }
+    if (client->cli->callback_only_on_fd_readable == 1) {
+        ev_io_set(&client->io, client->cli->fd, EV_READ);
+    } else {
+        ev_io_set(&client->io, client->cli->fd, EV_READ|EV_WRITE);
     }
 }
 

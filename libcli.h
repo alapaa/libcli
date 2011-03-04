@@ -88,6 +88,7 @@ struct cli_def {
     ccrContext z; // Re-entrant state for using coroutine lib from Simon Tatham
     int fd; // Descriptor for this client
     int revents;
+    int callback_only_on_fd_readable;
 };
 
 struct cli_filter {

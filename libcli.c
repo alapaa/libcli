@@ -1195,7 +1195,7 @@ int cli_process_event(struct cli_def *cli)
 
     int retval = CLI_UNINITIALIZED;
     ccrBegin(ccrs);
-
+    cli->callback_only_on_fd_readable = 0;
     /* fprintf(stdout, "F: %s, L: %d, Got revents, EV_READ: %d, EV_WRITE: %d\n", */
     /*         __FILE__, */
     /*         __LINE__, */
@@ -1381,8 +1381,9 @@ int cli_process_event(struct cli_def *cli)
             /* revents & EV_READ, */
             /* revents & EV_WRITE); */
 
+            cli->callback_only_on_fd_readable = 1;
             if ((cli->revents & EV_READ) == 0) {
-                continue;
+                ccrReturn(CLI_OK);
             }
 
             if ((ccrs->n = read(cli->fd, &ccrs->c, 1)) < 0)
@@ -1394,6 +1395,8 @@ int cli_process_event(struct cli_def *cli)
                 ccrs->l = -1;
                 ccrReturn(CLI_QUIT);
             }
+
+            cli->callback_only_on_fd_readable = 0;
 
             //if (cli->idle_timeout)
             //    time(&cli->last_action);
