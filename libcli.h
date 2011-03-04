@@ -89,6 +89,7 @@ struct cli_def {
     int fd; // Descriptor for this client
     int revents;
     int callback_only_on_fd_readable;
+    int wanted_revents;
 };
 
 struct cli_filter {

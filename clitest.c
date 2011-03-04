@@ -65,9 +65,19 @@ static void client_cb(EV_P_ ev_io *w, int revents) {
     struct sock_ev_client* client = (struct sock_ev_client*) w;
     client->cli->revents = revents;
 
-    if (revents & EV_WRITE) printf("w");
-    if (revents & EV_READ) printf("R");
-    printf(".");
+    if (revents & EV_WRITE) {
+        printf("w%d", client->cli->fd);
+    }
+    if (revents & EV_READ) {
+        printf("R%d", client->cli->fd);
+    }
+    if ( (revents & EV_READ)==0 &&
+         client->cli->callback_only_on_fd_readable == 1)
+    {
+        printf("\nError! Requested callbacks only when fd readable, got "
+               "callback without fd readable\n\n");
+    }
+    printf(".  ");
     fflush(stdout);
 
     retval = cli_process_event(client->cli);
@@ -80,11 +90,24 @@ static void client_cb(EV_P_ ev_io *w, int revents) {
         close(client->cli->fd);
         cli_done(client->cli);
         free(client);
-    }
-    if (client->cli->callback_only_on_fd_readable == 1) {
-        ev_io_set(&client->io, client->cli->fd, EV_READ);
     } else {
-        ev_io_set(&client->io, client->cli->fd, EV_READ|EV_WRITE);
+        if (client->cli->callback_only_on_fd_readable == 1 &&
+            (client->cli->wanted_revents & EV_WRITE) )
+        {
+            ev_io_stop(EV_A_ &client->io);
+            ev_io_set(&client->io, client->cli->fd, EV_READ);
+            client->cli->wanted_revents = EV_READ;
+            printf("Only read events enabled on sock %d...\n", client->cli->fd);
+            ev_io_start(EV_A_ &client->io);
+        } else if (client->cli->callback_only_on_fd_readable == 0 &&
+                   (client->cli->wanted_revents & EV_WRITE) == 0)
+        {
+            ev_io_stop(EV_A_ &client->io);
+            ev_io_set(&client->io, client->cli->fd, EV_READ|EV_WRITE);
+            client->cli->wanted_revents = EV_READ|EV_WRITE;
+            printf("    Both read AND write events enabled on sock %d\n", client->cli->fd);
+            ev_io_start(EV_A_ &client->io);
+        }
     }
 }
 
