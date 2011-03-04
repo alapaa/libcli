@@ -43,12 +43,10 @@ struct sock_ev_serv {
 
 struct sock_ev_client {
     ev_io io;
-    int fd;
     int index;
     struct sock_ev_serv* server;
 
     struct cli_def *cli;
-    ccrContext z;
 };
 
 
@@ -65,54 +63,27 @@ static void client_cb(EV_P_ ev_io *w, int revents) {
     int retval = CLI_UNINITIALIZED;
 
     struct sock_ev_client* client = (struct sock_ev_client*) w;
+    client->cli->revents = revents;
 
-    retval = cli_process_event(&client->z, client->cli, client->fd,
-                               EV_A_ &client->io, revents);
+    retval = cli_process_event(client->cli);
 
     if (retval != CLI_OK) {
         // Do cleanup
 
         puts("Doing cleanup");
-        cli_done(client->cli);
         ev_io_stop(EV_A_ &client->io);
-        close(client->fd);
+        close(client->cli->fd);
+        cli_done(client->cli);
         free(client);
     }
 }
 
-        /* int n; */
-        /* char str[100] = ".\0"; */
-
-        /* printf("[r]"); */
-        /* n = recv(client->fd, str, 100, 0); */
-        /* if (n <= 0) { */
-        /*   if (0 == n) { */
-        /*     // an orderly disconnect */
-        /*     puts("orderly disconnect"); */
-        /*     ev_io_stop(EV_A_ &client->io); */
-        /*     close(client->fd); */
-        /*   }  else if (EAGAIN == errno) { */
-        /*     puts("should never get in this state with libev"); */
-        /*   } else { */
-        /*     perror("recv"); */
-        /*   } */
-        /*   return; */
-        /* } */
-        /* printf("socket client said: %s", str); */
-
-        /* // Assuming that whenever a client is readable, it is also writable ? */
-        /* if (send(client->fd, str, n, 0) < 0) { */
-        /*   perror("send"); */
-        /* } */
-
-
 int setup_cli(struct cli_def **cli_def);
+
 inline static struct sock_ev_client* client_new(int fd) {
     struct sock_ev_client* client;
 
     client = realloc(NULL, sizeof(struct sock_ev_client));
-    client->fd = fd;
-    client->z = 0; // Re-entrant coroutine state struct
 
     int result = setup_cli(&client->cli);
     if (result < 0 || !client->cli) {
@@ -120,9 +91,13 @@ inline static struct sock_ev_client* client_new(int fd) {
         exit(EXIT_FAILURE);
     }
 
+    client->cli->fd = fd;
+    client->cli->z = 0; // Re-entrant coroutine state struct
+    client->cli->revents = 0;
+
     //client->server = server;
-    setnonblock(client->fd);
-    ev_io_init(&client->io, client_cb, client->fd, EV_READ|EV_WRITE);
+    setnonblock(client->cli->fd);
+    ev_io_init(&client->io, client_cb, client->cli->fd, EV_READ|EV_WRITE);
 
     return client;
 }

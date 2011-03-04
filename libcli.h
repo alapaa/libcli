@@ -6,11 +6,17 @@ extern "C" {
 #endif
 
 /*
+ * Erik Alapää, 2011
+ *
  * Code derived from libcli (LGPL) by David Parrish david@dparrish.com.
  * Original code heavily modified to support single-threading and libev,
  * i.e. removed fork() and select(). Added coroutine support from Simon Tatham
  * for facilitating this major re-write.
  */
+
+// TODO: Check if enabling callback when libev finds socket writable needs
+//       re-thinking.
+// TODO: Valgrind...
 
 #include <stdio.h>
 #include <stdarg.h>
@@ -40,6 +46,12 @@ extern "C" {
 
 #define CLI_MAX_LINE_LENGTH     4096
 #define CLI_MAX_LINE_WORDS      128
+
+// Event type. These should be identical to libev, and should be easy to use
+// with other descriptor handlers such as select, poll, epoll etc.
+
+#define CLI_EVENT_READ           0x01 /* descriptor read will not block */
+#define CLI_EVENT_WRITE          0x02 /* descriptor write will not block */
 
 struct cli_def {
     int completion_callback;
@@ -72,6 +84,10 @@ struct cli_def {
     unsigned int idle_timeout;
     int (*idle_timeout_callback)(struct cli_def *);
     time_t last_action;
+
+    ccrContext z; // Re-entrant state for using coroutine lib from Simon Tatham
+    int fd; // Descriptor for this client
+    int revents;
 };
 
 struct cli_filter {
@@ -160,8 +176,7 @@ int cli_unregister_command(struct cli_def *cli, char *command);
 
 int cli_run_command(struct cli_def *cli, char *command);
 
-int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
-                      EV_P_ ev_io *io, int revents);
+int cli_process_event(struct cli_def *cli);
 
 /*
  * This reads and processes every line read from f as if it were entered at the

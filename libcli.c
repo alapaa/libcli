@@ -1164,11 +1164,12 @@ static int show_prompt(struct cli_def *cli, int sockfd)
 
 // TODO: Need to call ccrAbort to delete context var at non-normal exit,
 // see coroutine header file for more info.
-int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
-                      EV_P_ ev_io *io, int revents)
+int cli_process_event(struct cli_def *cli)
 {
     // TODO: Move all vars into ccr context. UPDATE: Most vars moved, check if
     // more moves necessary
+
+    ccrContParam = &cli->z;
 
     ccrBeginContext;
     unsigned char c;
@@ -1231,7 +1232,7 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
 
 
     ccrs->nwanted = strlen(ccrs->negotiate);
-    ccrs->nwritten = write(sockfd, ccrs->negotiate, ccrs->nwanted);
+    ccrs->nwritten = write(cli->fd, ccrs->negotiate, ccrs->nwanted);
 
     if (ccrs->nwritten < 0) {
         if (errno != EWOULDBLOCK) {
@@ -1263,11 +1264,11 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
     /*
      * OMG, HACK
      */
-    if (!(cli->client = fdopen(_open_osfhandle(sockfd,0), "w+")))
+    if (!(cli->client = fdopen(_open_osfhandle(cli->fd,0), "w+")))
         ccrReturn(CLI_QUIT);
-    cli->client->_file = sockfd;
+    cli->client->_file = cli->fd;
 #else
-    if (!(cli->client = fdopen(sockfd, "w+")))
+    if (!(cli->client = fdopen(cli->fd, "w+")))
         ccrReturn(CLI_QUIT);
 #endif
 
@@ -1336,32 +1337,32 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
             if (cli->showprompt)
             {
                 if (cli->state != STATE_PASSWORD && cli->state != STATE_ENABLE_PASSWORD)
-                    write(sockfd, "\r\n", 2);
+                    write(cli->fd, "\r\n", 2);
 
                 switch (cli->state)
                 {
                     case STATE_LOGIN:
-                        write(sockfd, "Username: ", strlen("Username: "));
+                        write(cli->fd, "Username: ", strlen("Username: "));
                         break;
 
                     case STATE_PASSWORD:
-                        write(sockfd, "Password: ", strlen("Password: "));
+                        write(cli->fd, "Password: ", strlen("Password: "));
                         break;
 
                     case STATE_NORMAL:
                     case STATE_ENABLE:
-                        show_prompt(cli, sockfd);
-                        write(sockfd, ccrs->cmd, ccrs->l);
+                        show_prompt(cli, cli->fd);
+                        write(cli->fd, ccrs->cmd, ccrs->l);
                         if (ccrs->cursor < ccrs->l)
                         {
                             int n = ccrs->l - ccrs->cursor;
                             while (n--)
-                                write(sockfd, "\b", 1);
+                                write(cli->fd, "\b", 1);
                         }
                         break;
 
                     case STATE_ENABLE_PASSWORD:
-                        write(sockfd, "Password: ", strlen("Password: "));
+                        write(cli->fd, "Password: ", strlen("Password: "));
                         break;
 
                 }
@@ -1380,11 +1381,11 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
             /* revents & EV_READ, */
             /* revents & EV_WRITE); */
 
-            if ((revents & EV_READ) == 0) {
+            if ((cli->revents & EV_READ) == 0) {
                 continue;
             }
 
-            if ((ccrs->n = read(sockfd, &ccrs->c, 1)) < 0)
+            if ((ccrs->n = read(cli->fd, &ccrs->c, 1)) < 0)
             {
                 if (errno == EINTR) // Interrupted by signal
                     continue;
@@ -1479,7 +1480,7 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
                 if (cli->state != STATE_PASSWORD &&
                     cli->state != STATE_ENABLE_PASSWORD)
                 {
-                    write(sockfd, "\r\n", 2);
+                    write(cli->fd, "\r\n", 2);
                 }
                 break;
             }
@@ -1492,7 +1493,7 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
 
             if (ccrs->c == CTRL('C'))
             {
-                write(sockfd, "\a", 1);
+                write(cli->fd, "\a", 1);
                 continue;
             }
 
@@ -1524,7 +1525,7 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
                 {
                     if (ccrs->l == 0 || ccrs->cursor == 0)
                     {
-                        write(sockfd, "\a", 1); // alert (BEL) character
+                        write(cli->fd, "\a", 1); // alert (BEL) character
                         continue;
                     }
 
@@ -1541,7 +1542,7 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
                             if (cli->state != STATE_PASSWORD &&
                                 cli->state != STATE_ENABLE_PASSWORD)
                             {
-                                write(sockfd, "\b \b", 3);
+                                write(cli->fd, "\b \b", 3);
                             }
                         }
                         else
@@ -1554,15 +1555,15 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
                                 for (i = ccrs->cursor; i <= ccrs->l; i++) {
                                     ccrs->cmd[i] = ccrs->cmd[i+1];
                                 }
-                                write(sockfd, "\b", 1);
-                                write(sockfd, ccrs->cmd + ccrs->cursor,
+                                write(cli->fd, "\b", 1);
+                                write(cli->fd, ccrs->cmd + ccrs->cursor,
                                       strlen(ccrs->cmd + ccrs->cursor));
-                                write(sockfd, " ", 1);
+                                write(cli->fd, " ", 1);
                                 for (i = 0; i <=
                                          (int)strlen(ccrs->cmd + ccrs->cursor);
                                      i++)
                                 {
-                                    write(sockfd, "\b", 1);
+                                    write(cli->fd, "\b", 1);
                                 }
                             }
                         }
@@ -1584,12 +1585,12 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
                 {
                     continue;
                 }
-                write(sockfd, "\r\n", 2);
-                show_prompt(cli, sockfd);
-                write(sockfd, ccrs->cmd, ccrs->l);
+                write(cli->fd, "\r\n", 2);
+                show_prompt(cli, cli->fd);
+                write(cli->fd, ccrs->cmd, ccrs->l);
 
                 for (i = 0; i < cursorback; i++)
-                    write(sockfd, "\b", 1);
+                    write(cli->fd, "\b", 1);
 
                 continue;
             }
@@ -1602,7 +1603,7 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
                 {
                     memset(ccrs->cmd, 0, ccrs->l);
                 } else {
-                    cli_clear_line(sockfd, ccrs->cmd, ccrs->l, ccrs->cursor);
+                    cli_clear_line(cli->fd, ccrs->cmd, ccrs->l, ccrs->cursor);
                 }
                 ccrs->l = ccrs->cursor = 0;
                 continue;
@@ -1619,10 +1620,10 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
                 {
                     int c; // Dangerous, same name, different var...
                     for (c = ccrs->cursor; c < ccrs->l; c++)
-                        write(sockfd, " ", 1);
+                        write(cli->fd, " ", 1);
 
                     for (c = ccrs->cursor; c < ccrs->l; c++)
-                        write(sockfd, "\b", 1);
+                        write(cli->fd, "\b", 1);
                 }
 
                 memset(ccrs->cmd + ccrs->cursor, 0, ccrs->l - ccrs->cursor);
@@ -1651,7 +1652,7 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
             {
                 if (cli->mode != MODE_EXEC)
                 {
-                    cli_clear_line(sockfd, ccrs->cmd, ccrs->l, ccrs->cursor);
+                    cli_clear_line(cli->fd, ccrs->cmd, ccrs->l, ccrs->cursor);
                     cli_set_configmode(cli, MODE_EXEC, NULL);
                     cli->showprompt = 1;
                 }
@@ -1679,7 +1680,7 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
                                                       CLI_MAX_LINE_WORDS);
                 if (num_completions == 0)
                 {
-                    write(sockfd, "\a", 1);
+                    write(cli->fd, "\a", 1);
                 }
                 else if (num_completions == 1)
                 {
@@ -1691,36 +1692,36 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
                         {
                             break;
                         }
-                        write(sockfd, "\b", 1);
+                        write(cli->fd, "\b", 1);
                     }
                     strcpy((ccrs->cmd + ccrs->l), completions[0]);
                     ccrs->l += strlen(completions[0]);
                     ccrs->cmd[ccrs->l++] = ' ';
                     ccrs->cursor = ccrs->l;
-                    write(sockfd, completions[0], strlen(completions[0]));
-                    write(sockfd, " ", 1);
+                    write(cli->fd, completions[0], strlen(completions[0]));
+                    write(cli->fd, " ", 1);
                 }
                 else if (ccrs->lastchar == CTRL('I'))
                 {
                     // double tab
                     int i;
-                    write(sockfd, "\r\n", 2);
+                    write(cli->fd, "\r\n", 2);
                     for (i = 0; i < num_completions; i++)
                     {
-                        write(sockfd, completions[i], strlen(completions[i]));
+                        write(cli->fd, completions[i], strlen(completions[i]));
                         if (i % 4 == 3)
-                            write(sockfd, "\r\n", 2);
+                            write(cli->fd, "\r\n", 2);
                         else
-                            write(sockfd, "     ", 1);
+                            write(cli->fd, "     ", 1);
                     }
-                    if (i % 4 != 3) write(sockfd, "\r\n", 2);
+                    if (i % 4 != 3) write(cli->fd, "\r\n", 2);
                         cli->showprompt = 1;
                 }
                 else
                 {
                     // More than one completion
                     ccrs->lastchar = ccrs->c;
-                    write(sockfd, "\a", 1);
+                    write(cli->fd, "\a", 1);
                 }
                 continue;
             }
@@ -1781,11 +1782,11 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
                 if (history_found && cli->history[ccrs->in_history])
                 {
                     // Show history item
-                    cli_clear_line(sockfd, ccrs->cmd, ccrs->l, ccrs->cursor);
+                    cli_clear_line(cli->fd, ccrs->cmd, ccrs->l, ccrs->cursor);
                     memset(ccrs->cmd, 0, CLI_MAX_LINE_LENGTH);
                     strncpy(ccrs->cmd, cli->history[ccrs->in_history], CLI_MAX_LINE_LENGTH - 1);
                     ccrs->l = ccrs->cursor = strlen(ccrs->cmd);
-                    write(sockfd, ccrs->cmd, ccrs->l);
+                    write(cli->fd, ccrs->cmd, ccrs->l);
                 }
 
                 continue;
@@ -1799,7 +1800,7 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
                     if (ccrs->cursor)
                     {
                         if (cli->state != STATE_PASSWORD && cli->state != STATE_ENABLE_PASSWORD)
-                            write(sockfd, "\b", 1);
+                            write(cli->fd, "\b", 1);
 
                         ccrs->cursor--;
                     }
@@ -1809,7 +1810,7 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
                     if (ccrs->cursor < ccrs->l)
                     {
                         if (cli->state != STATE_PASSWORD && cli->state != STATE_ENABLE_PASSWORD)
-                            write(sockfd, &ccrs->cmd[ccrs->cursor], 1);
+                            write(cli->fd, &ccrs->cmd[ccrs->cursor], 1);
 
                         ccrs->cursor++;
                     }
@@ -1825,8 +1826,8 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
                 {
                     if (cli->state != STATE_PASSWORD && cli->state != STATE_ENABLE_PASSWORD)
                     {
-                        write(sockfd, "\r", 1);
-                        show_prompt(cli, sockfd);
+                        write(cli->fd, "\r", 1);
+                        show_prompt(cli, cli->fd);
                     }
 
                     ccrs->cursor = 0;
@@ -1841,7 +1842,7 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
                 if (ccrs->cursor < ccrs->l)
                 {
                     if (cli->state != STATE_PASSWORD && cli->state != STATE_ENABLE_PASSWORD)
-                        write(sockfd, &ccrs->cmd[ccrs->cursor], ccrs->l - ccrs->cursor);
+                        write(cli->fd, &ccrs->cmd[ccrs->cursor], ccrs->l - ccrs->cursor);
 
                     ccrs->cursor = ccrs->l;
                 }
@@ -1861,7 +1862,7 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
                 }
                 else
                 {
-                    write(sockfd, "\a", 1);
+                    write(cli->fd, "\a", 1);
                     continue;
                 }
             }
@@ -1878,9 +1879,9 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
                     // Write what we've just added
                     ccrs->cmd[ccrs->cursor] = ccrs->c;
 
-                    write(sockfd, &ccrs->cmd[ccrs->cursor], ccrs->l - ccrs->cursor + 1);
+                    write(cli->fd, &ccrs->cmd[ccrs->cursor], ccrs->l - ccrs->cursor + 1);
                     for (i = 0; i < (ccrs->l - ccrs->cursor + 1); i++)
-                        write(sockfd, "\b", 1);
+                        write(cli->fd, "\b", 1);
                     ccrs->l++;
                 }
                 else
@@ -1894,12 +1895,12 @@ int cli_process_event(ccrContParam, struct cli_def *cli, int sockfd,
             {
                 if (ccrs->c == '?' && ccrs->cursor == ccrs->l)
                 {
-                    write(sockfd, "\r\n", 2);
+                    write(cli->fd, "\r\n", 2);
                     ccrs->oldcmd = ccrs->cmd;
                     ccrs->oldl = ccrs->cursor = ccrs->l - 1;
                     break;
                 }
-                write(sockfd, &ccrs->c, 1);
+                write(cli->fd, &ccrs->c, 1);
             }
 
             ccrs->oldcmd = 0;
