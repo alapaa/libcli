@@ -37,7 +37,7 @@ libcli.a: libcli.o
 
 libcli.o: libcli.h
 
-clitest: clitest.o array-heap.o $(LIB) libcli.a
+clitest: clitest.o array-heap.o $(LIB) libcli.a libcli.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $< array-heap.o -L. libcli.a -lcrypt -lev
 #	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $< array-heap.o -L. -lcli -lev
 
