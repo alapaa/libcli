@@ -121,8 +121,7 @@ struct cli_command {
 struct cli_def *cli_init();
 
 /*
- * This is optional, but it's a good idea to call this when you are finished
- * with libcli.  This frees memory used by libcli.
+ * This frees memory used by libcli.
  */
 int cli_done(struct cli_def *cli);
 
