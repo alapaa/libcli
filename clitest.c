@@ -9,6 +9,8 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <stddef.h>
+
 #include "libcli.h"
 
 // Includes from unix echo server code
@@ -19,6 +21,7 @@
 
 #include <ev.h>
 #include <assert.h>
+
 
 #include "coroutine.h"
 
@@ -35,6 +38,7 @@
 
 struct sock_ev_serv {
     ev_io io;
+    ev_signal signal_watcher;
     int fd;
     struct sockaddr_in addr;
     int socket_len;
@@ -53,22 +57,69 @@ struct sock_ev_client {
     struct sock_ev_client *next;
 };
 
-// Add a client at head of list
-struct sock_ev_client *list_add_front(struct sock_ev_serv *server)
-{
-    client = calloc(1, sizeof(struct sock_ev_client));
 
+unsigned int regular_count = 0;
+unsigned int debug_regular = 0;
+
+
+
+int setup_cli(struct cli_def **cli_def);
+int setnonblock(int fd);
+static void not_blocked(EV_P_ ev_periodic *w, int revents);
+static void client_cb(EV_P_ ev_io *w, int revents);
+
+static struct sock_ev_client*
+client_new(int fd, struct sock_ev_serv *server) {
+    struct sock_ev_client *client  = calloc(1, sizeof(struct sock_ev_client));
+
+    int result = setup_cli(&client->cli);
+    if (result < 0 || !client->cli) {
+        perror("CLI setup failed");
+        exit(EXIT_FAILURE);
+    }
+
+    client->cli->fd = fd;
+    client->cli->z = 0; // Re-entrant coroutine state struct
+    client->cli->revents = 0;
+
+    client->server = server;
+    setnonblock(client->cli->fd);
+    ev_io_init(&client->io, client_cb, client->cli->fd, EV_READ|EV_WRITE);
+
+    return client;
+}
+
+static void client_del(EV_P_ ev_io *w, struct sock_ev_client **client)
+{
+    assert(client);
+    assert(*client); // Free of NULL is nominally OK, but we want to detect it
+    printf("Doing cleanup, client addr %p\n", *client);
+    ev_io_stop(EV_A_ &(*client)->io);
+    close((*client)->cli->fd);
+    cli_done((*client)->cli);
+    free(*client);
+    *client = NULL; // For error detection
+}
+
+
+// Add a client at head of list
+void list_add_front(
+    struct sock_ev_serv *server,
+    struct sock_ev_client *client)
+{
     // Add new client at front
-    server->client_list->prev = client;
-    client->prev = server->client_list;
+    if (server->client_list) {
+        server->client_list->prev = client;
+    }
+    client->next = server->client_list;
     server->client_list = client;
     server->n_clients++;
 }
 
-void client_del(struct sock_ev_client **client);
+
 
 // Remove client from list
-list_del(struct sock_ev_serv *server, struct sock_ev_client *client)
+void list_del(struct sock_ev_client *client)
 {
     // Unlink
     if (client->prev) {
@@ -83,35 +134,32 @@ list_del(struct sock_ev_serv *server, struct sock_ev_client *client)
         }
     }
 
-    client_del(&client);
-    server->n_clients--;
-    assert(server->n_clients >= 0);
+    client->server->n_clients--;
+    if (client == client->server->client_list) {
+        client->server->client_list = client->server->client_list->next;
+    }
+    assert(client->server->n_clients >= 0);
 }
 
 
-list_cleanup_all(struct sock_ev_serv *server)
+void list_cleanup_all(EV_P_ ev_io *w, struct sock_ev_serv *server)
 {
+    printf("Entered list_cleanup_all()\n");
+
     struct sock_ev_client *curr = server->client_list;
     struct sock_ev_client *next = NULL;
     while(curr) {
         next = curr->next;
-        client_del(&curr);
+        client_del(EV_A_ w, &curr);
         server->n_clients--;
         curr = next;
     }
 
-    assert(server->n_clients == 0)
+    server->client_list = NULL;
+
+    assert(server->n_clients == 0);
 }
 
-
-
-
-
-int setnonblock(int fd);
-static void not_blocked(EV_P_ ev_periodic *w, int revents);
-
-unsigned int regular_count = 0;
-unsigned int debug_regular = 0;
 
 //------------
 // This callback is called when client data is available
@@ -141,7 +189,8 @@ static void client_cb(EV_P_ ev_io *w, int revents) {
 
     if (retval != CLI_OK) {
         // Do cleanup
-        client_del(&client);
+        list_del(client);
+        client_del(EV_A_ &client->io, &client);
     } else {
         if (client->cli->callback_only_on_fd_readable == 1 &&
             (client->cli->wanted_revents & EV_WRITE) )
@@ -162,44 +211,6 @@ static void client_cb(EV_P_ ev_io *w, int revents) {
         }
     }
 }
-
-int setup_cli(struct cli_def **cli_def);
-
-inline static struct sock_ev_client*
-client_new(int fd, struct_ev_server *server) {
-    struct sock_ev_client* client;
-
-    client = list_add_front(server->client_list);
-
-    int result = setup_cli(&client->cli);
-    if (result < 0 || !client->cli) {
-        perror("CLI setup failed");
-        exit(EXIT_FAILURE);
-    }
-
-    client->cli->fd = fd;
-    client->cli->z = 0; // Re-entrant coroutine state struct
-    client->cli->revents = 0;
-
-    client->server = server;
-    setnonblock(client->cli->fd);
-    ev_io_init(&client->io, client_cb, client->cli->fd, EV_READ|EV_WRITE);
-
-    return client;
-}
-
-void client_del(struct sock_ev_client **client)
-{
-    assert(client);
-    assert(*client); // Free of NULL is nominally OK, but we want to detect it
-    printf("Doing cleanup, client addr %p", *client);
-    ev_io_stop(EV_A_ &(*client)->io);
-    close(*client->cli->fd);
-    cli_done(*client->cli);
-    free(*client);
-    *client = NULL; // For error detection
-}
-
 
 // This callback is called when data is readable on the unix socket.
 static void server_cb(EV_P_ ev_io *w, int revents) {
@@ -235,7 +246,7 @@ static void server_cb(EV_P_ ev_io *w, int revents) {
         }
 
         client = client_new(client_fd, server);
-
+        list_add_front(server, client);
 
         ev_io_start(EV_A_ &client->io);
     }
@@ -295,13 +306,45 @@ int server_init(struct sock_ev_serv* server, int max_queue) {
     return 0;
 }
 
+/* void sigint_handler(int sig) */
+/* { */
+/*     printf("Got signal %d\n", sig); */
+
+/*     close(server.fd); */
+/*     list_cleanup_all(gloop, &server); */
+/* } */
+
+static void
+sigint_cb (EV_P_ ev_signal *w, int revents)
+{
+    printf("Got SIGINT\n");
+
+    struct sock_ev_serv server =
+        *(struct sock_ev_serv*)(
+            ((void*)w) - offsetof(struct sock_ev_serv, signal_watcher)
+            );
+
+    close(server.fd);
+    list_cleanup_all(EV_A_ &server.io, &server);
+
+    ev_unloop (EV_A_ EVUNLOOP_ALL);
+}
+
 int main(void) {
     int max_queue = 128;
-    struct sock_ev_serv server = { 0 };
+
+    struct sock_ev_serv server;
+    bzero(&server, sizeof(struct sock_ev_serv));
     struct ev_periodic every_few_seconds;
+
+    //signal(SIGINT, sigint_handler);
 
     // Create our single-loop for this single-thread application
     EV_P  = ev_default_loop(0);
+
+
+    ev_signal_init (&server.signal_watcher, sigint_cb, SIGINT);
+    ev_signal_start (EV_A_ &server.signal_watcher);
 
     server.addr.sin_family = AF_INET;
     server.addr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -322,9 +365,9 @@ int main(void) {
     ev_loop(EV_A_ 0);
 
     // This point is only ever reached if the loop is manually exited
-    puts("Reached end of main(), cleaining up...\n");
+    puts("Reached end of main(), cleaning up...\n");
     close(server.fd);
-    list_cleanup_all(server->client_list);
+    list_cleanup_all(EV_A_ &server.io, &server);
 
     return EXIT_SUCCESS;
 }
