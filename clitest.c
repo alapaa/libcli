@@ -65,20 +65,20 @@ static void client_cb(EV_P_ ev_io *w, int revents) {
     struct sock_ev_client* client = (struct sock_ev_client*) w;
     client->cli->revents = revents;
 
-    if (revents & EV_WRITE) {
-        printf("w%d", client->cli->fd);
-    }
-    if (revents & EV_READ) {
-        printf("R%d", client->cli->fd);
-    }
+    /* if (revents & EV_WRITE) { */
+    /*     printf("w%d", client->cli->fd); */
+    /* } */
+    /* if (revents & EV_READ) { */
+    /*     printf("R%d", client->cli->fd); */
+    /* } */
     if ( (revents & EV_READ)==0 &&
          client->cli->callback_only_on_fd_readable == 1)
     {
         printf("\nError! Requested callbacks only when fd readable, got "
                "callback without fd readable\n\n");
     }
-    printf(".  ");
-    fflush(stdout);
+    /* printf(".  "); */
+    /* fflush(stdout); */
 
     retval = cli_process_event(client->cli);
 
@@ -97,7 +97,7 @@ static void client_cb(EV_P_ ev_io *w, int revents) {
             ev_io_stop(EV_A_ &client->io);
             ev_io_set(&client->io, client->cli->fd, EV_READ);
             client->cli->wanted_revents = EV_READ;
-            printf("Only read events enabled on sock %d...\n", client->cli->fd);
+            //printf("Only read events enabled on sock %d...\n", client->cli->fd);
             ev_io_start(EV_A_ &client->io);
         } else if (client->cli->callback_only_on_fd_readable == 0 &&
                    (client->cli->wanted_revents & EV_WRITE) == 0)
@@ -105,7 +105,7 @@ static void client_cb(EV_P_ ev_io *w, int revents) {
             ev_io_stop(EV_A_ &client->io);
             ev_io_set(&client->io, client->cli->fd, EV_READ|EV_WRITE);
             client->cli->wanted_revents = EV_READ|EV_WRITE;
-            printf("    Both read AND write events enabled on sock %d\n", client->cli->fd);
+            //printf("    Both read AND write events enabled on sock %d\n", client->cli->fd);
             ev_io_start(EV_A_ &client->io);
         }
     }
@@ -269,7 +269,7 @@ int main(void) {
 
 
 static void not_blocked(EV_P_ ev_periodic *w, int revents) {
-    puts("...\n");
+    //puts("...\n");
 }
 
 
@@ -366,9 +366,11 @@ int cmd_debug_regular(struct cli_def *cli, UNUSED(char *command), char *argv[], 
 
 int check_auth(char *username, char *password)
 {
-    if (strcasecmp(username, "fred") != 0)
+    //if (strcasecmp(username, "fred") != 0)
+    if (strcasecmp(username, "f") != 0)
         return CLI_ERROR;
-    if (strcasecmp(password, "nerk") != 0)
+    //if (strcasecmp(password, "nerk") != 0)
+    if (strcasecmp(password, "") != 0)
         return CLI_ERROR;
     return CLI_OK;
 }
