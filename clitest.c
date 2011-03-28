@@ -61,15 +61,15 @@ struct sock_ev_client {
 unsigned int regular_count = 0;
 unsigned int debug_regular = 0;
 
-
-
 int setup_cli(struct cli_def **cli_def);
 int setnonblock(int fd);
 static void not_blocked(EV_P_ ev_periodic *w, int revents);
 static void client_cb(EV_P_ ev_io *w, int revents);
 
-static struct sock_ev_client*
-client_new(int fd, struct sock_ev_serv *server) {
+static struct sock_ev_client* client_new(
+    int fd,
+    struct sock_ev_serv *server)
+{
     struct sock_ev_client *client  = calloc(1, sizeof(struct sock_ev_client));
 
     int result = setup_cli(&client->cli);
@@ -89,7 +89,9 @@ client_new(int fd, struct sock_ev_serv *server) {
     return client;
 }
 
-static void client_del(EV_P_ ev_io *w, struct sock_ev_client **client)
+static void client_del(
+    EV_P_ ev_io *w,
+    struct sock_ev_client **client)
 {
     assert(client);
     assert(*client); // Free of NULL is nominally OK, but we want to detect it
@@ -116,10 +118,9 @@ void list_add_front(
     server->n_clients++;
 }
 
-
-
 // Remove client from list
-void list_del(struct sock_ev_client *client)
+void list_del(
+    struct sock_ev_client *client)
 {
     // Unlink
     if (client->prev) {
@@ -142,7 +143,9 @@ void list_del(struct sock_ev_client *client)
 }
 
 
-void list_cleanup_all(EV_P_ ev_io *w, struct sock_ev_serv *server)
+void list_cleanup_all(
+    EV_P_ ev_io *w,
+    struct sock_ev_serv *server)
 {
     printf("Entered list_cleanup_all()\n");
 
@@ -161,9 +164,11 @@ void list_cleanup_all(EV_P_ ev_io *w, struct sock_ev_serv *server)
 }
 
 
-//------------
 // This callback is called when client data is available
-static void client_cb(EV_P_ ev_io *w, int revents) {
+static void client_cb(
+    EV_P_ ev_io *w,
+    int revents)
+{
     // a client has become readable or writable
     int retval = CLI_UNINITIALIZED;
 
@@ -206,14 +211,18 @@ static void client_cb(EV_P_ ev_io *w, int revents) {
             ev_io_stop(EV_A_ &client->io);
             ev_io_set(&client->io, client->cli->fd, EV_READ|EV_WRITE);
             client->cli->wanted_revents = EV_READ|EV_WRITE;
-            //printf("    Both read AND write events enabled on sock %d\n", client->cli->fd);
+            //printf("    Both read AND write events enabled on sock %d\n",
+            // client->cli->fd);
             ev_io_start(EV_A_ &client->io);
         }
     }
 }
 
 // This callback is called when data is readable on the unix socket.
-static void server_cb(EV_P_ ev_io *w, int revents) {
+static void server_cb(
+    EV_P_ ev_io *w,
+    int revents)
+{
     puts("socket has become readable");
 
     int client_fd;
@@ -253,7 +262,8 @@ static void server_cb(EV_P_ ev_io *w, int revents) {
 }
 
 // Simply adds O_NONBLOCK to the file descriptor of choice
-int setnonblock(int fd)
+int setnonblock(
+    int fd)
 {
     int flags;
 
@@ -262,7 +272,9 @@ int setnonblock(int fd)
     return fcntl(fd, F_SETFL, flags);
 }
 
-int socket_init(struct sockaddr_in* addr, int max_queue)
+int socket_init(
+    struct sockaddr_in* addr,
+    int max_queue)
 {
     int fd;
     int on = 1;
@@ -286,9 +298,13 @@ int socket_init(struct sockaddr_in* addr, int max_queue)
    return fd;
 }
 
-int server_init(struct sock_ev_serv* server, int max_queue) {
+int server_init(
+    struct sock_ev_serv* server,
+    int max_queue)
+{
     server->fd = socket_init(&server->addr, max_queue);
-    //server->socket_len = sizeof(server->socket.sun_family) + strlen(server->socket.sun_path);
+    //server->socket_len = sizeof(server->socket.sun_family) +
+    // strlen(server->socket.sun_path);
     server->socket_len = sizeof(server->addr);
 
     if (-1 == bind(server->fd, (struct sockaddr*) &server->addr, server->socket_len))
@@ -306,80 +322,28 @@ int server_init(struct sock_ev_serv* server, int max_queue) {
     return 0;
 }
 
-/* void sigint_handler(int sig) */
-/* { */
-/*     printf("Got signal %d\n", sig); */
-
-/*     close(server.fd); */
-/*     list_cleanup_all(gloop, &server); */
-/* } */
-
 static void
-sigint_cb (EV_P_ ev_signal *w, int revents)
+sigint_cb (
+    EV_P_ ev_signal *w,
+    int revents)
 {
-    printf("Got SIGINT\n");
-
-    struct sock_ev_serv server =
-        *(struct sock_ev_serv*)(
-            ((void*)w) - offsetof(struct sock_ev_serv, signal_watcher)
-            );
-
-    close(server.fd);
-    list_cleanup_all(EV_A_ &server.io, &server);
+    printf("\nGot signal %d\n", w->signum);
 
     ev_unloop (EV_A_ EVUNLOOP_ALL);
 }
 
-int main(void) {
-    int max_queue = 128;
-
-    struct sock_ev_serv server;
-    bzero(&server, sizeof(struct sock_ev_serv));
-    struct ev_periodic every_few_seconds;
-
-    //signal(SIGINT, sigint_handler);
-
-    // Create our single-loop for this single-thread application
-    EV_P  = ev_default_loop(0);
-
-
-    ev_signal_init (&server.signal_watcher, sigint_cb, SIGINT);
-    ev_signal_start (EV_A_ &server.signal_watcher);
-
-    server.addr.sin_family = AF_INET;
-    server.addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    server.addr.sin_port = htons(CLITEST_PORT);
-
-    server_init(&server, max_queue);
-
-    // To be sure that we aren't actually blocking
-    ev_periodic_init(&every_few_seconds, not_blocked, 0, 20., 0);
-    ev_periodic_start(EV_A_ &every_few_seconds);
-
-    // Get notified whenever the socket is ready to read
-    ev_io_init(&server.io, server_cb, server.fd, EV_READ);
-    ev_io_start(EV_A_ &server.io);
-
-    // Run our loop, ostensibly forever
-    puts("starting event loop ...\n");
-    ev_loop(EV_A_ 0);
-
-    // This point is only ever reached if the loop is manually exited
-    puts("Reached end of main(), cleaning up...\n");
-    close(server.fd);
-    list_cleanup_all(EV_A_ &server.io, &server);
-
-    return EXIT_SUCCESS;
-}
-
-
-static void not_blocked(EV_P_ ev_periodic *w, int revents) {
+static void not_blocked(
+    EV_P_ ev_periodic *w,
+    int revents)
+{
     //puts("...\n");
 }
 
-
-//------------
-int cmd_test(struct cli_def *cli, char *command, char *argv[], int argc)
+int cmd_test(
+    struct cli_def *cli,
+    char *command,
+    char *argv[],
+    int argc)
 {
     int i;
     cli_print(cli, "called %s with \"%s\"", __FUNCTION__, command);
@@ -390,7 +354,10 @@ int cmd_test(struct cli_def *cli, char *command, char *argv[], int argc)
     return CLI_OK;
 }
 
-int cmd_set(struct cli_def *cli, UNUSED(char *command), char *argv[],
+int cmd_set(
+    struct cli_def *cli,
+    UNUSED(char *command),
+    char *argv[],
     int argc)
 {
     if (argc < 2 || strcmp(argv[0], "?") == 0)
@@ -429,7 +396,10 @@ int cmd_set(struct cli_def *cli, UNUSED(char *command), char *argv[],
     return CLI_OK;
 }
 
-int cmd_config_int(struct cli_def *cli, UNUSED(char *command), char *argv[],
+int cmd_config_int(
+    struct cli_def *cli,
+    UNUSED(char *command),
+    char *argv[],
     int argc)
 {
     if (argc < 1)
@@ -449,27 +419,41 @@ int cmd_config_int(struct cli_def *cli, UNUSED(char *command), char *argv[],
     return CLI_OK;
 }
 
-int cmd_config_int_exit(struct cli_def *cli, UNUSED(char *command),
-    UNUSED(char *argv[]), UNUSED(int argc))
+int cmd_config_int_exit(
+    struct cli_def *cli,
+    UNUSED(char *command),
+    UNUSED(char *argv[]),
+    UNUSED(int argc))
 {
     cli_set_configmode(cli, MODE_CONFIG, NULL);
     return CLI_OK;
 }
 
-int cmd_show_regular(struct cli_def *cli, UNUSED(char *command), char *argv[], int argc)
+int cmd_show_regular(
+    struct cli_def *cli,
+    UNUSED(char *command),
+    char *argv[],
+    int argc)
 {
     cli_print(cli, "cli_regular() has run %u times", regular_count);
     return CLI_OK;
 }
 
-int cmd_debug_regular(struct cli_def *cli, UNUSED(char *command), char *argv[], int argc)
+int cmd_debug_regular(
+    struct cli_def *cli,
+    UNUSED(char *command),
+    char *argv[],
+    int argc)
 {
     debug_regular = !debug_regular;
-    cli_print(cli, "cli_regular() debugging is %s", debug_regular ? "enabled" : "disabled");
+    cli_print(cli, "cli_regular() debugging is %s",
+              debug_regular ? "enabled" : "disabled");
     return CLI_OK;
 }
 
-int check_auth(char *username, char *password)
+int check_auth(
+    char *username,
+    char *password)
 {
     //if (strcasecmp(username, "fred") != 0)
     if (strcasecmp(username, "f") != 0)
@@ -480,7 +464,8 @@ int check_auth(char *username, char *password)
     return CLI_OK;
 }
 
-int regular_callback(struct cli_def *cli)
+int regular_callback(
+    struct cli_def *cli)
 {
     regular_count++;
     if (debug_regular)
@@ -491,23 +476,28 @@ int regular_callback(struct cli_def *cli)
     return CLI_OK;
 }
 
-int check_enable(char *password)
+int check_enable(
+    char *password)
 {
     return !strcasecmp(password, "topsecret");
 }
 
-int idle_timeout(struct cli_def *cli)
+int idle_timeout(
+    struct cli_def *cli)
 {
     cli_print(cli, "Custom idle timeout");
     return CLI_QUIT;
 }
 
-void pc(UNUSED(struct cli_def *cli), char *string)
+void pc(
+    UNUSED(struct cli_def *cli),
+    char *string)
 {
     printf("%s\n", string);
 }
 
-int setup_cli(struct cli_def **cli_def)
+int setup_cli(
+    struct cli_def **cli_def)
 {
     struct cli_command *c;
 
@@ -579,5 +569,45 @@ int setup_cli(struct cli_def **cli_def)
     }
 
     return 0;
+}
+
+int main(void)
+{
+    int max_queue = 128;
+
+    struct sock_ev_serv server;
+    bzero(&server, sizeof(struct sock_ev_serv));
+    struct ev_periodic every_few_seconds;
+
+    // Create our single-loop for this single-thread application
+    EV_P  = ev_default_loop(0);
+
+    ev_signal_init (&server.signal_watcher, sigint_cb, SIGINT);
+    ev_signal_start (EV_A_ &server.signal_watcher);
+
+    server.addr.sin_family = AF_INET;
+    server.addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    server.addr.sin_port = htons(CLITEST_PORT);
+
+    server_init(&server, max_queue);
+
+    // To be sure that we aren't actually blocking
+    ev_periodic_init(&every_few_seconds, not_blocked, 0, 20., 0);
+    ev_periodic_start(EV_A_ &every_few_seconds);
+
+    // Get notified whenever the socket is ready to read
+    ev_io_init(&server.io, server_cb, server.fd, EV_READ);
+    ev_io_start(EV_A_ &server.io);
+
+    // Run our loop, ostensibly forever
+    puts("starting event loop ...\n");
+    ev_loop(EV_A_ 0);
+
+    // This point is only ever reached if the loop is manually exited
+    puts("End of main(), cleaning up...\n");
+    close(server.fd);
+    list_cleanup_all(EV_A_ &server.io, &server);
+
+    return EXIT_SUCCESS;
 }
 
