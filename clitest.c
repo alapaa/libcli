@@ -21,7 +21,7 @@
 #include <assert.h>
 
 #include "coroutine.h"
-#include "array-heap.h"
+
 // End includes from unix echo server code
 
 #define CLITEST_PORT                8000
@@ -38,7 +38,9 @@ struct sock_ev_serv {
     int fd;
     struct sockaddr_in addr;
     int socket_len;
-    array clients;
+
+    struct sock_ev_client *client_list;
+    size_t n_clients;
 };
 
 struct sock_ev_client {
@@ -47,7 +49,62 @@ struct sock_ev_client {
     struct sock_ev_serv* server;
 
     struct cli_def *cli;
+    struct sock_ev_client *prev;
+    struct sock_ev_client *next;
 };
+
+// Add a client at head of list
+struct sock_ev_client *list_add_front(struct sock_ev_serv *server)
+{
+    client = calloc(1, sizeof(struct sock_ev_client));
+
+    // Add new client at front
+    server->client_list->prev = client;
+    client->prev = server->client_list;
+    server->client_list = client;
+    server->n_clients++;
+}
+
+void client_del(struct sock_ev_client **client);
+
+// Remove client from list
+list_del(struct sock_ev_serv *server, struct sock_ev_client *client)
+{
+    // Unlink
+    if (client->prev) {
+        if (client->next) {
+            client->next->prev = client->prev;
+        }
+    }
+
+    if (client->next) {
+        if (client->prev) {
+            client->prev->next = client->next;
+        }
+    }
+
+    client_del(&client);
+    server->n_clients--;
+    assert(server->n_clients >= 0);
+}
+
+
+list_cleanup_all(struct sock_ev_serv *server)
+{
+    struct sock_ev_client *curr = server->client_list;
+    struct sock_ev_client *next = NULL;
+    while(curr) {
+        next = curr->next;
+        client_del(&curr);
+        server->n_clients--;
+        curr = next;
+    }
+
+    assert(server->n_clients == 0)
+}
+
+
+
 
 
 int setnonblock(int fd);
@@ -84,12 +141,7 @@ static void client_cb(EV_P_ ev_io *w, int revents) {
 
     if (retval != CLI_OK) {
         // Do cleanup
-
-        puts("Doing cleanup");
-        ev_io_stop(EV_A_ &client->io);
-        close(client->cli->fd);
-        cli_done(client->cli);
-        free(client);
+        client_del(&client);
     } else {
         if (client->cli->callback_only_on_fd_readable == 1 &&
             (client->cli->wanted_revents & EV_WRITE) )
@@ -113,10 +165,11 @@ static void client_cb(EV_P_ ev_io *w, int revents) {
 
 int setup_cli(struct cli_def **cli_def);
 
-inline static struct sock_ev_client* client_new(int fd) {
+inline static struct sock_ev_client*
+client_new(int fd, struct_ev_server *server) {
     struct sock_ev_client* client;
 
-    client = realloc(NULL, sizeof(struct sock_ev_client));
+    client = list_add_front(server->client_list);
 
     int result = setup_cli(&client->cli);
     if (result < 0 || !client->cli) {
@@ -128,12 +181,25 @@ inline static struct sock_ev_client* client_new(int fd) {
     client->cli->z = 0; // Re-entrant coroutine state struct
     client->cli->revents = 0;
 
-    //client->server = server;
+    client->server = server;
     setnonblock(client->cli->fd);
     ev_io_init(&client->io, client_cb, client->cli->fd, EV_READ|EV_WRITE);
 
     return client;
 }
+
+void client_del(struct sock_ev_client **client)
+{
+    assert(client);
+    assert(*client); // Free of NULL is nominally OK, but we want to detect it
+    printf("Doing cleanup, client addr %p", *client);
+    ev_io_stop(EV_A_ &(*client)->io);
+    close(*client->cli->fd);
+    cli_done(*client->cli);
+    free(*client);
+    *client = NULL; // For error detection
+}
+
 
 // This callback is called when data is readable on the unix socket.
 static void server_cb(EV_P_ ev_io *w, int revents) {
@@ -168,9 +234,9 @@ static void server_cb(EV_P_ ev_io *w, int revents) {
                    inet_ntoa(remote_addr.sin_addr));
         }
 
-        client = client_new(client_fd);
-        client->server = server;
-        client->index = array_push(&server->clients, client);
+        client = client_new(client_fd, server);
+
+
         ev_io_start(EV_A_ &client->io);
     }
 }
@@ -214,8 +280,6 @@ int server_init(struct sock_ev_serv* server, int max_queue) {
     //server->socket_len = sizeof(server->socket.sun_family) + strlen(server->socket.sun_path);
     server->socket_len = sizeof(server->addr);
 
-    array_init(&server->clients, 128);
-
     if (-1 == bind(server->fd, (struct sockaddr*) &server->addr, server->socket_len))
     {
       perror("echo server bind");
@@ -233,16 +297,12 @@ int server_init(struct sock_ev_serv* server, int max_queue) {
 
 int main(void) {
     int max_queue = 128;
-    struct sock_ev_serv server;
+    struct sock_ev_serv server = { 0 };
     struct ev_periodic every_few_seconds;
 
     // Create our single-loop for this single-thread application
     EV_P  = ev_default_loop(0);
 
-    // Create unix socket in non-blocking fashion
-    //server_init(&server, "/tmp/libev-echo.sock", max_queue);
-
-    memset(&server.addr, 0, sizeof(server.addr));
     server.addr.sin_family = AF_INET;
     server.addr.sin_addr.s_addr = htonl(INADDR_ANY);
     server.addr.sin_port = htons(CLITEST_PORT);
@@ -262,7 +322,9 @@ int main(void) {
     ev_loop(EV_A_ 0);
 
     // This point is only ever reached if the loop is manually exited
+    puts("Reached end of main(), cleaining up...\n");
     close(server.fd);
+    list_cleanup_all(server->client_list);
 
     return EXIT_SUCCESS;
 }
