@@ -61,3 +61,6 @@ rpm:
 	tar zcvf libcli-$(MAJOR).$(MINOR).$(REVISION).tar.gz --exclude CVS --exclude *.tar.gz libcli-$(MAJOR).$(MINOR).$(REVISION)
 	rm -rf libcli-$(MAJOR).$(MINOR).$(REVISION)
 	rpm -ta libcli-$(MAJOR).$(MINOR).$(REVISION).tar.gz --clean
+
+vg:
+	valgrind --leak-check=full --track-origins=yes --show-reachable=yes ./clitest
