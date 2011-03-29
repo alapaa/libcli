@@ -45,7 +45,7 @@ clitest.exe: clitest.c libcli.o
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $< libcli.o -lws2_32
 
 clean:
-	rm -f *.o $(LIB)* clitest *.a
+	rm -f *.o $(LIB)* clitest *.a core
 
 install: $(LIB)
 	install -d $(DESTDIR)$(PREFIX)/include $(DESTDIR)$(PREFIX)/lib
