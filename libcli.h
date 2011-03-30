@@ -16,7 +16,6 @@ extern "C" {
 
 // TODO: Check if enabling callback when libev finds socket writable needs
 //       re-thinking.
-// TODO: Valgrind...
 
 #include <stdio.h>
 #include <stdarg.h>
