@@ -2083,7 +2083,9 @@ int cli_file(struct cli_def *cli, FILE *fh, int privilege, int mode)
     return CLI_OK;
 }
 
-static void _print(struct cli_def *cli, int print_mode, char *format, va_list ap)
+// If newline != 0, print a trailing newline
+static void _print2(int newline, struct cli_def *cli, int print_mode,
+                    char *format, va_list ap)
 {
     va_list aq;
     int n;
@@ -2132,8 +2134,13 @@ static void _print(struct cli_def *cli, int print_mode, char *format, va_list ap
         {
             if (cli->print_callback)
                 cli->print_callback(cli, p);
-            else if (cli->client)
-                fprintf(cli->client, "%s\r\n", p);
+            else if (cli->client) {
+                if (newline) {
+                    fprintf(cli->client, "%s\r\n", p);
+                } else {
+                    fprintf(cli->client, "%s", p);
+                }
+            }
         }
 
         p = next;
@@ -2145,6 +2152,12 @@ static void _print(struct cli_def *cli, int print_mode, char *format, va_list ap
         memmove(cli->buffer, p, strlen(p));
     }
     else *cli->buffer = 0;
+}
+
+static void _print(struct cli_def *cli, int print_mode,
+                   char *format, va_list ap)
+{
+    _print2(1, cli, print_mode, format, ap);
 }
 
 void cli_bufprint(struct cli_def *cli, char *format, ...)
@@ -2167,6 +2180,16 @@ void cli_print(struct cli_def *cli, char *format, ...)
 
     va_start(ap, format);
     _print(cli, PRINT_FILTERED, format, ap);
+    va_end(ap);
+}
+
+// Print without adding newline
+void cli_print_wonl(struct cli_def *cli, char *format, ...)
+{
+    va_list ap;
+
+    va_start(ap, format);
+    _print2(0, cli, PRINT_FILTERED, format, ap);
     va_end(ap);
 }
 
