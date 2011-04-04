@@ -557,7 +557,7 @@ int cli_int_configure_terminal(struct cli_def *cli, UNUSED(char *command), UNUSE
     return CLI_OK;
 }
 
-struct cli_def *cli_init()
+struct cli_def *cli2_init()
 {
     struct cli_def *cli;
     struct cli_command *c;
@@ -1140,8 +1140,8 @@ static int pass_matches(char *pass, char *try)
     /*
      * oldtodo(windows...) - find a small crypt(3) function for use on windows
      */
-    if (des || !strncmp(pass, MD5_PREFIX, sizeof(MD5_PREFIX)-1))
-        try = crypt(try, pass);
+    //if (des || !strncmp(pass, MD5_PREFIX, sizeof(MD5_PREFIX)-1))
+    //    try = crypt(try, pass);
 #endif
 
     return !strcmp(pass, try);

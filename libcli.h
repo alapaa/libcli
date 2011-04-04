@@ -31,6 +31,7 @@ extern "C" {
 #define CLI_UNINITIALIZED       -4
 #define MAX_HISTORY		256
 
+
 #define PRIVILEGE_UNPRIVILEGED	0
 #define PRIVILEGE_PRIVILEGED	15
 #define MODE_ANY		-1
@@ -89,6 +90,7 @@ struct cli_def {
     int revents;
     int callback_only_on_fd_readable;
     int wanted_revents;
+    void *udata; // Used for evipc ptr
 };
 
 struct cli_filter {
@@ -117,7 +119,7 @@ struct cli_command {
  *  Returns a struct cli_def * which must be passed to all other cli_yyy
  *   functions.
  */
-struct cli_def *cli_init();
+struct cli_def *cli2_init();
 
 /*
  * This frees memory used by libcli.

@@ -503,7 +503,7 @@ int setup_cli(
 
     signal(SIGCHLD, SIG_IGN);
 
-    *cli_def = cli_init();
+    *cli_def = cli2_init();
     assert(*cli_def);
     struct cli_def *cli = *cli_def; // Legacy alias
 
