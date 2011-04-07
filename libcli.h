@@ -6,12 +6,14 @@ extern "C" {
 #endif
 
 /*
- * Erik Alapää, 2011
+ * Original author: David Parrish
+ * Non-blocking, single-threaded support: Erik Alapää
  *
  * Code derived from libcli (LGPL) by David Parrish david@dparrish.com.
  * Original code heavily modified to support single-threading and libev,
  * i.e. removed fork() and select(). Added coroutine support from Simon Tatham
- * for facilitating this major re-write.
+ * for facilitating this rather extensive re-write.
+ *
  */
 
 // TODO: Check if enabling callback when libev finds socket writable needs
