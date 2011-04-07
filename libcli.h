@@ -90,7 +90,7 @@ struct cli_def {
     int revents;
     int callback_only_on_fd_readable;
     int wanted_revents;
-    void *udata; // Used for evipc ptr
+    void *udata; // Generic user data
 };
 
 struct cli_filter {
