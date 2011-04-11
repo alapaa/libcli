@@ -107,6 +107,7 @@ struct cli_command {
     char *help;
     int privilege;
     int mode;
+    unsigned char stdargc; // True if callback wants argc to count command name
     unsigned int unique_len;
     struct cli_command *next;
     struct cli_command *children;
@@ -168,6 +169,19 @@ int cli_done(struct cli_def *cli);
  * command or presses ?.
  */
 struct cli_command *cli_register_command(
+    struct cli_def *cli,
+    struct cli_command *parent,
+    char *command,
+    int (*callback)(struct cli_def *, char *, char **, int),
+    int privilege,
+    int mode,
+    char *help);
+
+/*
+ * Same as cli_register_command, but tells libcli to use standard argc,
+ * i.e. count command name in argc.
+ */
+struct cli_command *cli_register_command_sargc(
     struct cli_def *cli,
     struct cli_command *parent,
     char *command,

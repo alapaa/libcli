@@ -383,15 +383,13 @@ int cli_set_configmode(struct cli_def *cli, int mode, char *config_desc)
     return old;
 }
 
-struct cli_command *cli_register_command(struct cli_def *cli,
+struct cli_command *cli_register_command_impl(struct cli_def *cli,
     struct cli_command *parent, char *command,
     int (*callback)(struct cli_def *cli, char *, char **, int),
-    int privilege, int mode, char *help)
+    int privilege, int mode, char *help,
+    struct cli_command *c)
 {
-    struct cli_command *c, *p;
-
-    if (!command) return NULL;
-    if (!(c = calloc(sizeof(struct cli_command), 1))) return NULL;
+    struct cli_command *p;
 
     c->callback = callback;
     c->next = NULL;
@@ -432,6 +430,46 @@ struct cli_command *cli_register_command(struct cli_def *cli,
     }
     return c;
 }
+
+struct cli_command *cli_register_command_sargc(struct cli_def *cli,
+    struct cli_command *parent, char *command,
+    int (*callback)(struct cli_def *cli, char *, char **, int),
+    int privilege, int mode, char *help)
+{
+    struct cli_command *c;
+    struct cli_command *result;
+
+    if (!command) return NULL;
+    if (!(c = calloc(sizeof(struct cli_command), 1))) return NULL;
+
+    c->stdargc = 1; // Use standard argc, i.e. command name counts in argc.
+
+    result = cli_register_command_impl(cli, parent, command, callback, privilege, mode,
+                                       help, c);
+
+    return result;
+}
+
+struct cli_command *cli_register_command(struct cli_def *cli,
+    struct cli_command *parent, char *command,
+    int (*callback)(struct cli_def *cli, char *, char **, int),
+    int privilege, int mode, char *help)
+{
+    struct cli_command *c;
+    struct cli_command *result;
+
+    if (!command) return NULL;
+    if (!(c = calloc(sizeof(struct cli_command), 1))) return NULL;
+
+    c->stdargc = 0; // Use libcli argc, i.e. command name does not count in argc.
+
+    result = cli_register_command_impl(cli, parent, command, callback, privilege, mode,
+                                       help, c);
+
+    return result;
+}
+
+
 
 static void cli_free_command(struct cli_command *cmd)
 {
@@ -967,9 +1005,17 @@ static int cli_find_command(struct cli_def *cli, struct cli_command *commands, i
                 }
             }
 
-            if (rc == CLI_OK)
-                rc = c->callback(cli, cli_command_name(cli, c), words + start_word, c_words - start_word);
-
+            if (rc == CLI_OK) {
+                if (c->stdargc) {
+                    rc = c->callback(cli, cli_command_name(cli, c),
+                                     words + start_word,
+                                     c_words - start_word);
+                } else {
+                    rc = c->callback(cli, cli_command_name(cli, c),
+                                     words + start_word + 1,
+                                     c_words - start_word - 1);
+                }
+            }
             // TODO: Internal callbacks expect argc not to count the command
             // name, external commands expect unix-style argc where the command
             // adds to argc. Possible fix: add a boolean to the command struct that
