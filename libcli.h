@@ -104,15 +104,19 @@ struct cli_filter {
 struct cli_command {
     char *command;
     int (*callback)(struct cli_def *, char *, char **, int);
-    unsigned int unique_len;
     char *help;
     int privilege;
     int mode;
+    unsigned int unique_len;
     struct cli_command *next;
     struct cli_command *children;
     struct cli_command *parent;
 };
 
+/*
+ * Convert result code to a string.
+ */
+    const char *cli_rc_to_str(int rc);
 
 /*
  *  This must be called before any other cli_yyy function.  It sets up the

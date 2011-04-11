@@ -41,7 +41,6 @@
  * read/write functions required for each ..
  */
 
-
 int read(int fd, void *buf, unsigned int count) {
     return recv(fd, buf, count, 0);
 }
@@ -103,6 +102,24 @@ int regex_dummy() {return 0;};
 #define REG_EXTENDED	0
 #define REG_ICASE	0
 #endif
+
+const char *cli_rc_to_str(int rc)
+{
+    switch(rc) {
+    case CLI_OK:
+        return "CLI_OK";
+    case CLI_ERROR:
+        return "CLI_ERROR";
+    case CLI_QUIT:
+        return "CLI_QUIT";
+    case CLI_ERROR_ARG:
+        return "CLI_ERROR_ARG";
+    case CLI_UNINITIALIZED:
+        return "CLI_UNINITIALIZED";
+    default:
+        return "Unknown error code";
+    }
+}
 
 enum cli_states {
     STATE_LOGIN,
@@ -953,6 +970,11 @@ static int cli_find_command(struct cli_def *cli, struct cli_command *commands, i
             if (rc == CLI_OK)
                 rc = c->callback(cli, cli_command_name(cli, c), words + start_word, c_words - start_word);
 
+            // TODO: Internal callbacks expect argc not to count the command
+            // name, external commands expect unix-style argc where the command
+            // adds to argc. Possible fix: add a boolean to the command struct that
+            // defines what type of argc the command expects.
+
             while (cli->filters)
             {
                 struct cli_filter *filt = cli->filters;
@@ -963,6 +985,11 @@ static int cli_find_command(struct cli_def *cli, struct cli_command *commands, i
                 free(filt);
             }
 
+            if (rc == CLI_OK) {
+                cli_print(cli, "\nOK");
+            } else {
+                cli_print(cli, "\nERROR: %d (%s)", rc, cli_rc_to_str(rc));
+            }
             return rc;
         }
         else if (cli->mode > MODE_CONFIG && c->mode == MODE_CONFIG)
@@ -1243,8 +1270,8 @@ int cli_process_event(struct cli_def *cli)
             assert(0);
         }
     } else if (ccrs->nwritten < ccrs->nwanted) {
-        fprintf(stderr, "Error, only partial write. nritten %d, nwanted %d\n",
-                ccrs->nwritten, ccrs->nwanted);
+        fprintf(stderr, "Error, only partial write. nritten %ld, nwanted %ld\n",
+                (long int)ccrs->nwritten, (long int)ccrs->nwanted);
         assert(0);
     }
 
@@ -1956,7 +1983,7 @@ int cli_process_event(struct cli_def *cli)
 
             if (allowed)
             {
-                cli_error(cli, "");
+                cli_error(cli, "%s", "");
                 cli->state = STATE_NORMAL;
             }
             else
