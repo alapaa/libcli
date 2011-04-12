@@ -17,7 +17,6 @@
 #include <unistd.h>
 #include <time.h>
 
-#include <ev.h>
 #include <assert.h>
 
 #ifndef WIN32
@@ -25,7 +24,9 @@
 #endif
 #include "libcli.h"
 
+#ifdef CLI_NB_ST
 #include "coroutine.h"
+#endif
 
 // vim:sw=4 ts=8
 
@@ -40,7 +41,6 @@
  * Stupid windows has multiple namespaces for filedescriptors, with different
  * read/write functions required for each ..
  */
-
 int read(int fd, void *buf, unsigned int count) {
     return recv(fd, buf, count, 0);
 }
@@ -199,20 +199,20 @@ void cli_allow_user(struct cli_def *cli, char *username, char *password)
     if (!(n = malloc(sizeof(struct unp))))
     {
         fprintf(stderr, "Couldn't allocate memory for user: %s", strerror(errno));
-        exit(EXIT_FAILURE);
+        return;
     }
     if (!(n->username = strdup(username)))
     {
         fprintf(stderr, "Couldn't allocate memory for username: %s", strerror(errno));
         free(n);
-        exit(EXIT_FAILURE);
+        return;
     }
     if (!(n->password = strdup(password)))
     {
         fprintf(stderr, "Couldn't allocate memory for password: %s", strerror(errno));
         free(n->username);
         free(n);
-        exit(EXIT_FAILURE);
+        return;
     }
     n->next = NULL;
 
@@ -231,7 +231,6 @@ void cli_allow_enable(struct cli_def *cli, char *password)
     if (!(cli->enable_password = strdup(password)))
     {
         fprintf(stderr, "Couldn't allocate memory for enable password: %s", strerror(errno));
-        exit(EXIT_FAILURE);
     }
 }
 
@@ -259,33 +258,21 @@ void cli_deny_user(struct cli_def *cli, char *username)
 void cli_set_banner(struct cli_def *cli, char *banner)
 {
     free_z(cli->banner);
-    if (banner && *banner) {
+    if (banner && *banner)
         cli->banner = strdup(banner);
-        if (!cli->banner) {
-            exit(EXIT_FAILURE);
-        }
-    }
 }
 
 void cli_set_hostname(struct cli_def *cli, char *hostname)
 {
     free_z(cli->hostname);
-    if (hostname && *hostname) {
+    if (hostname && *hostname)
         cli->hostname = strdup(hostname);
-        if (!cli->hostname) {
-            exit(EXIT_FAILURE);
-        }
-    }
 }
 
 void cli_set_promptchar(struct cli_def *cli, char *promptchar)
 {
     free_z(cli->promptchar);
     cli->promptchar = strdup(promptchar);
-
-    if (!cli->promptchar) {
-        exit(EXIT_FAILURE);
-    }
 }
 
 static int cli_build_shortest(struct cli_def *cli, struct cli_command *commands)
@@ -346,12 +333,8 @@ int cli_set_privilege(struct cli_def *cli, int priv)
 void cli_set_modestring(struct cli_def *cli, char *modestring)
 {
     free_z(cli->modestring);
-    if (modestring) {
+    if (modestring)
         cli->modestring = strdup(modestring);
-        if (modestring && !cli->modestring) {
-            exit(EXIT_FAILURE);
-        }
-    }
 }
 
 int cli_set_configmode(struct cli_def *cli, int mode, char *config_desc)
@@ -393,16 +376,14 @@ struct cli_command *cli_register_command_impl(struct cli_def *cli,
 
     c->callback = callback;
     c->next = NULL;
-    if (!(c->command = strdup(command))) {
-        exit(EXIT_FAILURE);
-    }
+    if (!(c->command = strdup(command)))
+        return NULL;
     c->parent = parent;
     c->privilege = privilege;
     c->mode = mode;
     if (help)
-        if (!(c->help = strdup(help))) {
-            exit(EXIT_FAILURE);
-        }
+        if (!(c->help = strdup(help)))
+            return NULL;
 
     if (parent)
     {
@@ -612,7 +593,7 @@ int cli_int_configure_terminal(struct cli_def *cli, UNUSED(char *command), UNUSE
     return CLI_OK;
 }
 
-struct cli_def *cli2_init()
+struct cli_def *cli_init()
 {
     struct cli_def *cli;
     struct cli_command *c;
@@ -713,9 +694,8 @@ static int cli_add_history(struct cli_def *cli, char *cmd)
         if (!cli->history[i])
         {
             if (i == 0 || strcasecmp(cli->history[i-1], cmd))
-            if ( !(cli->history[i] = strdup(cmd)) ) {
-                exit(EXIT_FAILURE);
-            }
+            if (!(cli->history[i] = strdup(cmd)))
+                return CLI_ERROR;
             return CLI_OK;
         }
     }
@@ -723,9 +703,8 @@ static int cli_add_history(struct cli_def *cli, char *cmd)
     free(cli->history[0]);
     for (i = 0; i < MAX_HISTORY-1; i++)
         cli->history[i] = cli->history[i+1];
-    if (!(cli->history[MAX_HISTORY - 1] = strdup(cmd))) {
-        exit(EXIT_FAILURE);
-    }
+    if (!(cli->history[MAX_HISTORY - 1] = strdup(cmd)))
+        return CLI_ERROR;
     return CLI_OK;
 }
 
@@ -763,11 +742,8 @@ static int cli_parse_line(char *line, char *words[], int max_words)
             if (word_start)
             {
                 int len = p - word_start;
-                words[nwords] = malloc(len + 1);
-                if (!words[nwords]) {
-                    exit(EXIT_FAILURE);
-                }
-                memcpy(words[nwords], word_start, len);
+
+                memcpy(words[nwords] = malloc(len + 1), word_start, len);
                 words[nwords++][len] = 0;
             }
 
@@ -791,9 +767,8 @@ static int cli_parse_line(char *line, char *words[], int max_words)
             {
                 if (*p == '|')
                 {
-                    if (!(words[nwords++] = strdup("|"))) {
-                        exit(EXIT_FAILURE);
-                    }
+                    if (!(words[nwords++] = strdup("|")))
+                        return 0;
                 }
                 else if (!isspace(*p))
                     word_start = p;
@@ -821,9 +796,6 @@ static char *join_words(int argc, char **argv)
     }
 
     p = malloc(len + 1);
-    if (!p) {
-        exit(EXIT_FAILURE);
-    }
     p[0] = 0;
 
     for (i = 0; i < argc; i++)
@@ -1207,7 +1179,7 @@ static int pass_matches(char *pass, char *try)
 
 #ifndef WIN32
     /*
-     * oldtodo(windows...) - find a small crypt(3) function for use on windows
+     * TODO - find a small crypt(3) function for use on windows
      */
     //if (des || !strncmp(pass, MD5_PREFIX, sizeof(MD5_PREFIX)-1))
     //    try = crypt(try, pass);
@@ -1230,7 +1202,763 @@ static int show_prompt(struct cli_def *cli, int sockfd)
 
     return len + write(sockfd, cli->promptchar, strlen(cli->promptchar));
 }
+#ifndef CLI_NB_ST
+int cli_loop(struct cli_def *cli, int sockfd)
+{
+    unsigned char c;
+    int n, l, oldl = 0, is_telnet_option = 0, skip = 0, esc = 0;
+    int cursor = 0, insertmode = 1;
+    char *cmd = NULL, *oldcmd = 0;
+    char *username = NULL, *password = NULL;
+    char *negotiate =
+        "\xFF\xFB\x03"
+        "\xFF\xFB\x01"
+        "\xFF\xFD\x03"
+        "\xFF\xFD\x01";
 
+    cli_build_shortest(cli, cli->commands);
+    cli->state = STATE_LOGIN;
+
+    cli_free_history(cli);
+    write(sockfd, negotiate, strlen(negotiate));
+
+    if ((cmd = malloc(CLI_MAX_LINE_LENGTH)) == NULL)
+        return CLI_ERROR;
+
+#ifdef WIN32
+    /*
+     * OMG, HACK
+     */
+    if (!(cli->client = fdopen(_open_osfhandle(sockfd,0), "w+")))
+        return CLI_ERROR;
+    cli->client->_file = sockfd;
+#else
+    if (!(cli->client = fdopen(sockfd, "w+")))
+        return CLI_ERROR;
+#endif
+
+    setbuf(cli->client, NULL);
+    if (cli->banner)
+        cli_error(cli, "%s", cli->banner);
+
+    // Set the last action now so we don't time immediately
+    if (cli->idle_timeout)
+        time(&cli->last_action);
+
+    /* start off in unprivileged mode */
+    cli_set_privilege(cli, PRIVILEGE_UNPRIVILEGED);
+    cli_set_configmode(cli, MODE_EXEC, NULL);
+
+    /* no auth required? */
+    if (!cli->users && !cli->auth_callback)
+        cli->state = STATE_NORMAL;
+
+    while (1)
+    {
+        signed int in_history = 0;
+        int lastchar = 0;
+        struct timeval tm;
+
+        cli->showprompt = 1;
+
+        if (oldcmd)
+        {
+            l = cursor = oldl;
+            oldcmd[l] = 0;
+            cli->showprompt = 1;
+            oldcmd = NULL;
+            oldl = 0;
+        }
+        else
+        {
+            memset(cmd, 0, CLI_MAX_LINE_LENGTH);
+            l = 0;
+            cursor = 0;
+        }
+
+        memcpy(&tm, &cli->timeout_tm, sizeof(tm));
+
+        while (1)
+        {
+            int sr;
+            fd_set r;
+            if (cli->showprompt)
+            {
+                if (cli->state != STATE_PASSWORD && cli->state != STATE_ENABLE_PASSWORD)
+                    write(sockfd, "\r\n", 2);
+
+                switch (cli->state)
+                {
+                    case STATE_LOGIN:
+                        write(sockfd, "Username: ", strlen("Username: "));
+                        break;
+
+                    case STATE_PASSWORD:
+                        write(sockfd, "Password: ", strlen("Password: "));
+                        break;
+
+                    case STATE_NORMAL:
+                    case STATE_ENABLE:
+                        show_prompt(cli, sockfd);
+                        write(sockfd, cmd, l);
+                        if (cursor < l)
+                        {
+                            int n = l - cursor;
+                            while (n--)
+                                write(sockfd, "\b", 1);
+                        }
+                        break;
+
+                    case STATE_ENABLE_PASSWORD:
+                        write(sockfd, "Password: ", strlen("Password: "));
+                        break;
+
+                }
+
+                cli->showprompt = 0;
+            }
+
+            FD_ZERO(&r);
+            FD_SET(sockfd, &r);
+
+            if ((sr = select(sockfd + 1, &r, NULL, NULL, &tm)) < 0)
+            {
+                /* select error */
+                if (errno == EINTR)
+                    continue;
+
+                perror("select");
+                l = -1;
+                break;
+            }
+
+            if (sr == 0)
+            {
+                /* timeout every second */
+                if (cli->regular_callback && cli->regular_callback(cli) != CLI_OK)
+                {
+                    l = -1;
+                    break;
+                }
+
+                if (cli->idle_timeout)
+                {
+                    if (time(NULL) - cli->last_action >= cli->idle_timeout)
+                    {
+                        if (cli->idle_timeout_callback)
+                        {
+                            // Call the callback and continue on if successful
+                            if (cli->idle_timeout_callback(cli) == CLI_OK)
+                            {
+                                // Reset the idle timeout counter
+                                time(&cli->last_action);
+                                continue;
+                            }
+                        }
+                        // Otherwise, break out of the main loop
+                        l = -1;
+                        break;
+                    }
+                }
+
+                memcpy(&tm, &cli->timeout_tm, sizeof(tm));
+                continue;
+            }
+
+            if ((n = read(sockfd, &c, 1)) < 0)
+            {
+                if (errno == EINTR)
+                    continue;
+
+                perror("read");
+                l = -1;
+                break;
+            }
+
+            if (cli->idle_timeout)
+                time(&cli->last_action);
+
+            if (n == 0)
+            {
+                l = -1;
+                break;
+            }
+
+            if (skip)
+            {
+                skip--;
+                continue;
+            }
+
+            if (c == 255 && !is_telnet_option)
+            {
+                is_telnet_option++;
+                continue;
+            }
+
+            if (is_telnet_option)
+            {
+                if (c >= 251 && c <= 254)
+                {
+                    is_telnet_option = c;
+                    continue;
+                }
+
+                if (c != 255)
+                {
+                    is_telnet_option = 0;
+                    continue;
+                }
+
+                is_telnet_option = 0;
+            }
+
+            /* handle ANSI arrows */
+            if (esc)
+            {
+                if (esc == '[')
+                {
+                    /* remap to readline control codes */
+                    switch (c)
+                    {
+                        case 'A': /* Up */
+                            c = CTRL('P');
+                            break;
+
+                        case 'B': /* Down */
+                            c = CTRL('N');
+                            break;
+
+                        case 'C': /* Right */
+                            c = CTRL('F');
+                            break;
+
+                        case 'D': /* Left */
+                            c = CTRL('B');
+                            break;
+
+                        default:
+                            c = 0;
+                    }
+
+                    esc = 0;
+                }
+                else
+                {
+                    esc = (c == '[') ? c : 0;
+                    continue;
+                }
+            }
+
+            if (c == 0) continue;
+            if (c == '\n') continue;
+
+            if (c == '\r')
+            {
+                if (cli->state != STATE_PASSWORD && cli->state != STATE_ENABLE_PASSWORD)
+                    write(sockfd, "\r\n", 2);
+                break;
+            }
+
+            if (c == 27)
+            {
+                esc = 1;
+                continue;
+            }
+
+            if (c == CTRL('C'))
+            {
+                write(sockfd, "\a", 1);
+                continue;
+            }
+
+            /* back word, backspace/delete */
+            if (c == CTRL('W') || c == CTRL('H') || c == 0x7f)
+            {
+                int back = 0;
+
+                if (c == CTRL('W')) /* word */
+                {
+                    int nc = cursor;
+
+                    if (l == 0 || cursor == 0)
+                        continue;
+
+                    while (nc && cmd[nc - 1] == ' ')
+                    {
+                        nc--;
+                        back++;
+                    }
+
+                    while (nc && cmd[nc - 1] != ' ')
+                    {
+                        nc--;
+                        back++;
+                    }
+                }
+                else /* char */
+                {
+                    if (l == 0 || cursor == 0)
+                    {
+                        write(sockfd, "\a", 1);
+                        continue;
+                    }
+
+                    back = 1;
+                }
+
+                if (back)
+                {
+                    while (back--)
+                    {
+                        if (l == cursor)
+                        {
+                            cmd[--cursor] = 0;
+                            if (cli->state != STATE_PASSWORD && cli->state != STATE_ENABLE_PASSWORD)
+                                write(sockfd, "\b \b", 3);
+                        }
+                        else
+                        {
+                            int i;
+                            cursor--;
+                            if (cli->state != STATE_PASSWORD && cli->state != STATE_ENABLE_PASSWORD)
+                            {
+                                for (i = cursor; i <= l; i++) cmd[i] = cmd[i+1];
+                                write(sockfd, "\b", 1);
+                                write(sockfd, cmd + cursor, strlen(cmd + cursor));
+                                write(sockfd, " ", 1);
+                                for (i = 0; i <= (int)strlen(cmd + cursor); i++)
+                                    write(sockfd, "\b", 1);
+                            }
+                        }
+                        l--;
+                    }
+
+                    continue;
+                }
+            }
+
+            /* redraw */
+            if (c == CTRL('L'))
+            {
+                int i;
+                int cursorback = l - cursor;
+
+                if (cli->state == STATE_PASSWORD || cli->state == STATE_ENABLE_PASSWORD)
+                    continue;
+
+                write(sockfd, "\r\n", 2);
+                show_prompt(cli, sockfd);
+                write(sockfd, cmd, l);
+
+                for (i = 0; i < cursorback; i++)
+                    write(sockfd, "\b", 1);
+
+                continue;
+            }
+
+            /* clear line */
+            if (c == CTRL('U'))
+            {
+                if (cli->state == STATE_PASSWORD || cli->state == STATE_ENABLE_PASSWORD)
+                    memset(cmd, 0, l);
+                else
+                    cli_clear_line(sockfd, cmd, l, cursor);
+
+                l = cursor = 0;
+                continue;
+            }
+
+            /* kill to EOL */
+            if (c == CTRL('K'))
+            {
+                if (cursor == l)
+                    continue;
+
+                if (cli->state != STATE_PASSWORD && cli->state != STATE_ENABLE_PASSWORD)
+                {
+                    int c;
+                    for (c = cursor; c < l; c++)
+                        write(sockfd, " ", 1);
+
+                    for (c = cursor; c < l; c++)
+                        write(sockfd, "\b", 1);
+                }
+
+                memset(cmd + cursor, 0, l - cursor);
+                l = cursor;
+                continue;
+            }
+
+            /* EOT */
+            if (c == CTRL('D'))
+            {
+                if (cli->state == STATE_PASSWORD || cli->state == STATE_ENABLE_PASSWORD)
+                    break;
+
+                if (l)
+                    continue;
+
+                l = -1;
+                break;
+            }
+
+            /* disable */
+            if (c == CTRL('Z'))
+            {
+                if (cli->mode != MODE_EXEC)
+                {
+                    cli_clear_line(sockfd, cmd, l, cursor);
+                    cli_set_configmode(cli, MODE_EXEC, NULL);
+                    cli->showprompt = 1;
+                }
+
+                continue;
+            }
+
+            /* TAB completion */
+            if (c == CTRL('I'))
+            {
+                char *completions[CLI_MAX_LINE_WORDS];
+                int num_completions = 0;
+
+                if (cli->state == STATE_LOGIN || cli->state == STATE_PASSWORD || cli->state == STATE_ENABLE_PASSWORD)
+                    continue;
+
+                if (cursor != l) continue;
+
+                num_completions = cli_get_completions(cli, cmd, completions, CLI_MAX_LINE_WORDS);
+                if (num_completions == 0)
+                {
+                    write(sockfd, "\a", 1);
+                }
+                else if (num_completions == 1)
+                {
+                    // Single completion
+                    for (; l > 0; l--, cursor--)
+                    {
+                        if (cmd[l-1] == ' ' || cmd[l-1] == '|')
+                            break;
+                        write(sockfd, "\b", 1);
+                    }
+                    strcpy((cmd + l), completions[0]);
+                    l += strlen(completions[0]);
+                    cmd[l++] = ' ';
+                    cursor = l;
+                    write(sockfd, completions[0], strlen(completions[0]));
+                    write(sockfd, " ", 1);
+                }
+                else if (lastchar == CTRL('I'))
+                {
+                    // double tab
+                    int i;
+                    write(sockfd, "\r\n", 2);
+                    for (i = 0; i < num_completions; i++)
+                    {
+                        write(sockfd, completions[i], strlen(completions[i]));
+                        if (i % 4 == 3)
+                            write(sockfd, "\r\n", 2);
+                        else
+                            write(sockfd, "     ", 1);
+                    }
+                    if (i % 4 != 3) write(sockfd, "\r\n", 2);
+                        cli->showprompt = 1;
+                }
+                else
+                {
+                    // More than one completion
+                    lastchar = c;
+                    write(sockfd, "\a", 1);
+                }
+                continue;
+            }
+
+            /* history */
+            if (c == CTRL('P') || c == CTRL('N'))
+            {
+                int history_found = 0;
+
+                if (cli->state == STATE_LOGIN || cli->state == STATE_PASSWORD || cli->state == STATE_ENABLE_PASSWORD)
+                    continue;
+
+                if (c == CTRL('P')) // Up
+                {
+                    in_history--;
+                    if (in_history < 0)
+                    {
+                        for (in_history = MAX_HISTORY-1; in_history >= 0; in_history--)
+                        {
+                            if (cli->history[in_history])
+                            {
+                                history_found = 1;
+                                break;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        if (cli->history[in_history]) history_found = 1;
+                    }
+                }
+                else // Down
+                {
+                    in_history++;
+                    if (in_history >= MAX_HISTORY || !cli->history[in_history])
+                    {
+                        int i = 0;
+                        for (i = 0; i < MAX_HISTORY; i++)
+                        {
+                            if (cli->history[i])
+                            {
+                                in_history = i;
+                                history_found = 1;
+                                break;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        if (cli->history[in_history]) history_found = 1;
+                    }
+                }
+                if (history_found && cli->history[in_history])
+                {
+                    // Show history item
+                    cli_clear_line(sockfd, cmd, l, cursor);
+                    memset(cmd, 0, CLI_MAX_LINE_LENGTH);
+                    strncpy(cmd, cli->history[in_history], CLI_MAX_LINE_LENGTH - 1);
+                    l = cursor = strlen(cmd);
+                    write(sockfd, cmd, l);
+                }
+
+                continue;
+            }
+
+            /* left/right cursor motion */
+            if (c == CTRL('B') || c == CTRL('F'))
+            {
+                if (c == CTRL('B')) /* Left */
+                {
+                    if (cursor)
+                    {
+                        if (cli->state != STATE_PASSWORD && cli->state != STATE_ENABLE_PASSWORD)
+                            write(sockfd, "\b", 1);
+
+                        cursor--;
+                    }
+                }
+                else /* Right */
+                {
+                    if (cursor < l)
+                    {
+                        if (cli->state != STATE_PASSWORD && cli->state != STATE_ENABLE_PASSWORD)
+                            write(sockfd, &cmd[cursor], 1);
+
+                        cursor++;
+                    }
+                }
+
+                continue;
+            }
+
+            /* start of line */
+            if (c == CTRL('A'))
+            {
+                if (cursor)
+                {
+                    if (cli->state != STATE_PASSWORD && cli->state != STATE_ENABLE_PASSWORD)
+                    {
+                        write(sockfd, "\r", 1);
+                        show_prompt(cli, sockfd);
+                    }
+
+                    cursor = 0;
+                }
+
+                continue;
+            }
+
+            /* end of line */
+            if (c == CTRL('E'))
+            {
+                if (cursor < l)
+                {
+                    if (cli->state != STATE_PASSWORD && cli->state != STATE_ENABLE_PASSWORD)
+                        write(sockfd, &cmd[cursor], l - cursor);
+
+                    cursor = l;
+                }
+
+                continue;
+            }
+
+            /* normal character typed */
+            if (cursor == l)
+            {
+                 /* append to end of line */
+                cmd[cursor] = c;
+                if (l < CLI_MAX_LINE_LENGTH - 1)
+                {
+                    l++;
+                    cursor++;
+                }
+                else
+                {
+                    write(sockfd, "\a", 1);
+                    continue;
+                }
+            }
+            else
+            {
+                // Middle of text
+                if (insertmode)
+                {
+                    int i;
+                    // Move everything one character to the right
+                    if (l >= CLI_MAX_LINE_LENGTH - 2) l--;
+                    for (i = l; i >= cursor; i--)
+                        cmd[i + 1] = cmd[i];
+                    // Write what we've just added
+                    cmd[cursor] = c;
+
+                    write(sockfd, &cmd[cursor], l - cursor + 1);
+                    for (i = 0; i < (l - cursor + 1); i++)
+                        write(sockfd, "\b", 1);
+                    l++;
+                }
+                else
+                {
+                    cmd[cursor] = c;
+                }
+                cursor++;
+            }
+
+            if (cli->state != STATE_PASSWORD && cli->state != STATE_ENABLE_PASSWORD)
+            {
+                if (c == '?' && cursor == l)
+                {
+                    write(sockfd, "\r\n", 2);
+                    oldcmd = cmd;
+                    oldl = cursor = l - 1;
+                    break;
+                }
+                write(sockfd, &c, 1);
+            }
+
+            oldcmd = 0;
+            oldl = 0;
+            lastchar = c;
+        }
+
+        if (l < 0) break;
+
+        if (cli->state == STATE_LOGIN)
+        {
+            if (l == 0) continue;
+
+            /* require login */
+            free_z(username);
+            if (!(username = strdup(cmd)))
+                return 0;
+            cli->state = STATE_PASSWORD;
+            cli->showprompt = 1;
+        }
+        else if (cli->state == STATE_PASSWORD)
+        {
+            /* require password */
+            int allowed = 0;
+
+            free_z(password);
+            if (!(password = strdup(cmd)))
+                return 0;
+            if (cli->auth_callback)
+            {
+                if (cli->auth_callback(username, password) == CLI_OK)
+                    allowed++;
+            }
+
+            if (!allowed)
+            {
+                struct unp *u;
+                for (u = cli->users; u; u = u->next)
+                {
+                    if (!strcmp(u->username, username) && pass_matches(u->password, password))
+                    {
+                        allowed++;
+                        break;
+                    }
+                }
+            }
+
+            if (allowed)
+            {
+                cli_error(cli, "");
+                cli->state = STATE_NORMAL;
+            }
+            else
+            {
+                cli_error(cli, "\n\nAccess denied");
+                free_z(username);
+                free_z(password);
+                cli->state = STATE_LOGIN;
+            }
+
+            cli->showprompt = 1;
+        }
+        else if (cli->state == STATE_ENABLE_PASSWORD)
+        {
+            int allowed = 0;
+            if (cli->enable_password)
+            {
+                /* check stored static enable password */
+                if (pass_matches(cli->enable_password, cmd))
+                    allowed++;
+            }
+
+            if (!allowed && cli->enable_callback)
+            {
+                /* check callback */
+                if (cli->enable_callback(cmd))
+                    allowed++;
+            }
+
+            if (allowed)
+            {
+                cli->state = STATE_ENABLE;
+                cli_set_privilege(cli, PRIVILEGE_PRIVILEGED);
+            }
+            else
+            {
+                cli_error(cli, "\n\nAccess denied");
+                cli->state = STATE_NORMAL;
+            }
+        }
+        else
+        {
+            if (l == 0) continue;
+            if (cmd[l - 1] != '?' && strcasecmp(cmd, "history") != 0)
+                cli_add_history(cli, cmd);
+
+            if (cli_run_command(cli, cmd) == CLI_QUIT)
+                break;
+        }
+
+        // Update the last_action time now as the last command run could take a
+        // long time to return
+        if (cli->idle_timeout)
+            time(&cli->last_action);
+    }
+
+    cli_free_history(cli);
+    free_z(username);
+    free_z(password);
+    free_z(cmd);
+
+    fclose(cli->client);
+    cli->client = 0;
+    return CLI_OK;
+}
+#else
 int cli_process_event(struct cli_def *cli)
 {
     ccrContParam = &cli->z;
@@ -1282,7 +2010,7 @@ int cli_process_event(struct cli_def *cli)
         "\xFF\xFD\x03"
         "\xFF\xFD\x01");
     if (!ccrs->negotiate) {
-        exit(EXIT_FAILURE);
+        return CLI_QUIT;
     }
 
     ccrs->nwanted = 0;
@@ -1319,7 +2047,7 @@ int cli_process_event(struct cli_def *cli)
     /*         revents & EV_WRITE); */
 
     if ((ccrs->cmd = malloc(CLI_MAX_LINE_LENGTH)) == NULL) {
-        exit(EXIT_FAILURE);
+        return CLI_QUIT;
     }
 
 
@@ -1974,7 +2702,7 @@ int cli_process_event(struct cli_def *cli)
             /* require login */
             free_z(ccrs->username);
             if (!(ccrs->username = strdup(ccrs->cmd))) {
-                exit(EXIT_FAILURE);
+                return CLI_QUIT;
             }
             cli->state = STATE_PASSWORD;
             cli->showprompt = 1;
@@ -2097,6 +2825,7 @@ CCR_FINISH:
     }
     ccrFinish(retval);
 }
+#endif // CLI_NB_ST
 
 int cli_file(struct cli_def *cli, FILE *fh, int privilege, int mode)
 {
@@ -2193,9 +2922,8 @@ static void _print(struct cli_def *cli, int print_mode, char *format, va_list ap
         {
             if (cli->print_callback)
                 cli->print_callback(cli, p);
-            else if (cli->client) {
+            else if (cli->client)
                 fprintf(cli->client, "%s\r\n", p);
-            }
         }
 
         p = next;
@@ -2401,7 +3129,7 @@ int cli_range_filter_init(struct cli_def *cli, int argc, char **argv, struct cli
         }
 
         if (!(from = strdup(argv[1])))
-            exit(EXIT_FAILURE);
+            return CLI_ERROR;
         to = join_words(argc-2, argv+2);
     }
     else // begin

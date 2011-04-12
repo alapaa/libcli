@@ -22,9 +22,10 @@ extern "C" {
 #include <stdio.h>
 #include <stdarg.h>
 
+#ifdef CLI_NB_ST
 #include <ev.h>
-
 #include "coroutine.h"
+#endif
 
 #define CLI_OK			0
 #define CLI_ERROR		-1
@@ -87,12 +88,14 @@ struct cli_def {
     int (*idle_timeout_callback)(struct cli_def *);
     time_t last_action;
 
+#ifdef CLI_NB_ST
     ccrContext z; // Re-entrant state for using coroutine lib from Simon Tatham
     int fd; // Descriptor for this client
     int revents;
     int callback_only_on_fd_readable;
     int wanted_revents;
     void *udata; // Generic user data
+#endif
 };
 
 struct cli_filter {
@@ -117,7 +120,7 @@ struct cli_command {
 /*
  * Convert result code to a string.
  */
-    const char *cli_rc_to_str(int rc);
+const char *cli_rc_to_str(int rc);
 
 /*
  *  This must be called before any other cli_yyy function.  It sets up the
@@ -126,7 +129,7 @@ struct cli_command {
  *  Returns a struct cli_def * which must be passed to all other cli_yyy
  *   functions.
  */
-struct cli_def *cli2_init();
+struct cli_def *cli_init();
 
 /*
  * This frees memory used by libcli.
@@ -198,7 +201,11 @@ int cli_unregister_command(struct cli_def *cli, char *command);
 
 int cli_run_command(struct cli_def *cli, char *command);
 
+#ifndef CLI_NB_ST
+int cli_loop(struct cli_def *cli, int sockfd);
+#else
 int cli_process_event(struct cli_def *cli);
+#endif
 
 /*
  * This reads and processes every line read from f as if it were entered at the

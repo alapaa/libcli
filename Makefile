@@ -2,6 +2,8 @@ UNAME = $(shell sh -c 'uname -s 2>/dev/null || echo not')
 DESTDIR =
 PREFIX = /usr/local
 
+#BUILD_NB_ST = 1 # non-blocking and single-threaded
+
 MAJOR = 1
 MINOR = 9
 REVISION = 5
@@ -11,6 +13,11 @@ CC = gcc
 DEBUG = -g
 #OPTIM = -O3
 CFLAGS += $(DEBUG) $(OPTIM) -Wall -Wformat-security -Wno-format-zero-length
+
+ifdef BUILD_NB_ST
+CFLAGS += -D CLI_NB_ST
+endif
+
 LDFLAGS += -shared
 LIBPATH += -L.
 
@@ -37,9 +44,13 @@ libcli.a: libcli.o
 
 libcli.o: libcli.h
 
-clitest: clitest.o $(LIB) libcli.a libcli.h
+ifdef BUILD_NB_ST
+clitest: clitest_nbst.o $(LIB) libcli.a libcli.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $< -L. libcli.a -lcrypt -lev
-#	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $< array-heap.o -L. -lcli -lev
+else
+clitest: clitest.o $(LIB) libcli.a libcli.h
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $<  -L. -lcli -lcrypt
+endif
 
 clitest.exe: clitest.c libcli.o
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $< libcli.o -lws2_32
