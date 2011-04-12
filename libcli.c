@@ -1016,10 +1016,6 @@ static int cli_find_command(struct cli_def *cli, struct cli_command *commands, i
                                      c_words - start_word - 1);
                 }
             }
-            // TODO: Internal callbacks expect argc not to count the command
-            // name, external commands expect unix-style argc where the command
-            // adds to argc. Possible fix: add a boolean to the command struct that
-            // defines what type of argc the command expects.
 
             while (cli->filters)
             {
@@ -1235,13 +1231,8 @@ static int show_prompt(struct cli_def *cli, int sockfd)
     return len + write(sockfd, cli->promptchar, strlen(cli->promptchar));
 }
 
-// TODO: Need to call ccrAbort to delete context var at non-normal exit,
-// see coroutine header file for more info.
 int cli_process_event(struct cli_def *cli)
 {
-    // TODO: Move all vars into ccr context. UPDATE: Most vars moved, check if
-    // more moves necessary
-
     ccrContParam = &cli->z;
 
     ccrBeginContext;
@@ -1297,7 +1288,6 @@ int cli_process_event(struct cli_def *cli)
     ccrs->nwanted = 0;
     ccrs->nwritten = 0;
 
-// TODO: Cleanup of e.g. negotiate string (strdup:ed)
     cli_build_shortest(cli, cli->commands);
     cli->state = STATE_LOGIN;
 
@@ -1444,15 +1434,6 @@ int cli_process_event(struct cli_def *cli)
                 ccrReturn(CLI_OK); // yield...
             }
 
-
-            /* TODO: Removed regular callback and idle timeout callback.
-               Add as libev timer callbacks instead */
-
-            /* fprintf(stdout, "(before read()) F: %s, L: %d, Got revents, EV_READ: %d, EV_WRITE: %d\n", */
-            /* __FILE__, */
-            /* __LINE__, */
-            /* revents & EV_READ, */
-            /* revents & EV_WRITE); */
 
             cli->callback_only_on_fd_readable = 1;
             if ((cli->revents & EV_READ) == 0) {
@@ -2110,6 +2091,10 @@ int cli_process_event(struct cli_def *cli)
 CCR_FINISH:
     assert(retval != CLI_UNINITIALIZED);
     printf("Calling ccrFinish(), retval %d\n", retval);
+    if (ccrs->negotiate) {
+        free(ccrs->negotiate);
+        ccrs->negotiate = NULL;
+    }
     ccrFinish(retval);
 }
 
