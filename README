@@ -7,6 +7,11 @@ To compile:
 	make
 	make install
 
+To build the non-blocking, single-threaded version (suitable for libev,
+select(), poll() etc.), do 'make clean; make BUILD_NB_ST=1' instead. This will
+also change the test program to match the modified library. As an alternative,
+uncomment the line defining BUILD_NB_ST in the Makefile.
+
 This will install libcli.so into /usr/local/lib. If you want to change
 the location, edit Makefile.
 
@@ -86,7 +91,7 @@ cli_register_command(c, "people", fn_people, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, 
 
 
 If callback is NULL, the command can be used as part of a tree, but cannot be
-individually run. 
+individually run.
 
 
 If you decide later that you don't want a command to be run, you can call

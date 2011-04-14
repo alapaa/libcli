@@ -2,6 +2,8 @@ UNAME = $(shell sh -c 'uname -s 2>/dev/null || echo not')
 DESTDIR =
 PREFIX = /usr/local
 
+#BUILD_NB_ST = 1 # non-blocking and single-threaded
+
 MAJOR = 1
 MINOR = 9
 REVISION = 5
@@ -9,8 +11,13 @@ LIB = libcli.so
 
 CC = gcc
 DEBUG = -g
-OPTIM = -O3
+#OPTIM = -O3
 CFLAGS += $(DEBUG) $(OPTIM) -Wall -Wformat-security -Wno-format-zero-length
+
+ifdef BUILD_NB_ST
+CFLAGS += -D CLI_NB_ST
+endif
+
 LDFLAGS += -shared
 LIBPATH += -L.
 
@@ -21,7 +28,7 @@ LDFLAGS += -Wl,-soname,$(LIB).$(MAJOR).$(MINOR)
 LIBS = -lcrypt
 endif
 
-all: $(LIB) clitest
+all: $(LIB) clitest libcli.a
 
 $(LIB): libcli.o
 	$(CC) -o $(LIB).$(MAJOR).$(MINOR).$(REVISION) $^ $(LDFLAGS) $(LIBS)
@@ -29,19 +36,27 @@ $(LIB): libcli.o
 	ln -s $(LIB).$(MAJOR).$(MINOR).$(REVISION) $(LIB).$(MAJOR).$(MINOR)
 	ln -s $(LIB).$(MAJOR).$(MINOR) $(LIB)
 
+libcli.a: libcli.o
+	ar r $@ $^
+
 %.o: %.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -o $@ -c $<
 
 libcli.o: libcli.h
 
-clitest: clitest.o $(LIB)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $< -L. -lcli
+ifdef BUILD_NB_ST
+clitest: clitest_nbst.o $(LIB) libcli.a libcli.h
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $< -L. libcli.a -lcrypt -lev
+else
+clitest: clitest.o $(LIB) libcli.a libcli.h
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $<  -L. -lcli -lcrypt
+endif
 
 clitest.exe: clitest.c libcli.o
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $< libcli.o -lws2_32
 
 clean:
-	rm -f *.o $(LIB)* clitest
+	rm -f *.o $(LIB)* clitest *.a core
 
 install: $(LIB)
 	install -d $(DESTDIR)$(PREFIX)/include $(DESTDIR)$(PREFIX)/lib
@@ -57,3 +72,6 @@ rpm:
 	tar zcvf libcli-$(MAJOR).$(MINOR).$(REVISION).tar.gz --exclude CVS --exclude *.tar.gz libcli-$(MAJOR).$(MINOR).$(REVISION)
 	rm -rf libcli-$(MAJOR).$(MINOR).$(REVISION)
 	rpm -ta libcli-$(MAJOR).$(MINOR).$(REVISION).tar.gz --clean
+
+vg:
+	valgrind --leak-check=full --track-origins=yes --show-reachable=yes ./clitest

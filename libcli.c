@@ -16,10 +16,17 @@
 #include <ctype.h>
 #include <unistd.h>
 #include <time.h>
+
+#include <assert.h>
+
 #ifndef WIN32
 #include <regex.h>
 #endif
 #include "libcli.h"
+
+#ifdef CLI_NB_ST
+#include "coroutine.h"
+#endif
 
 // vim:sw=4 ts=8
 
@@ -95,6 +102,24 @@ int regex_dummy() {return 0;};
 #define REG_EXTENDED	0
 #define REG_ICASE	0
 #endif
+
+const char *cli_rc_to_str(int rc)
+{
+    switch(rc) {
+    case CLI_OK:
+        return "CLI_OK";
+    case CLI_ERROR:
+        return "CLI_ERROR";
+    case CLI_QUIT:
+        return "CLI_QUIT";
+    case CLI_ERROR_ARG:
+        return "CLI_ERROR_ARG";
+    case CLI_UNINITIALIZED:
+        return "CLI_UNINITIALIZED";
+    default:
+        return "Unknown error code";
+    }
+}
 
 enum cli_states {
     STATE_LOGIN,
@@ -341,15 +366,13 @@ int cli_set_configmode(struct cli_def *cli, int mode, char *config_desc)
     return old;
 }
 
-struct cli_command *cli_register_command(struct cli_def *cli,
+struct cli_command *cli_register_command_impl(struct cli_def *cli,
     struct cli_command *parent, char *command,
     int (*callback)(struct cli_def *cli, char *, char **, int),
-    int privilege, int mode, char *help)
+    int privilege, int mode, char *help,
+    struct cli_command *c)
 {
-    struct cli_command *c, *p;
-
-    if (!command) return NULL;
-    if (!(c = calloc(sizeof(struct cli_command), 1))) return NULL;
+    struct cli_command *p;
 
     c->callback = callback;
     c->next = NULL;
@@ -388,6 +411,46 @@ struct cli_command *cli_register_command(struct cli_def *cli,
     }
     return c;
 }
+
+struct cli_command *cli_register_command_sargc(struct cli_def *cli,
+    struct cli_command *parent, char *command,
+    int (*callback)(struct cli_def *cli, char *, char **, int),
+    int privilege, int mode, char *help)
+{
+    struct cli_command *c;
+    struct cli_command *result;
+
+    if (!command) return NULL;
+    if (!(c = calloc(sizeof(struct cli_command), 1))) return NULL;
+
+    c->stdargc = 1; // Use standard argc, i.e. command name counts in argc.
+
+    result = cli_register_command_impl(cli, parent, command, callback, privilege, mode,
+                                       help, c);
+
+    return result;
+}
+
+struct cli_command *cli_register_command(struct cli_def *cli,
+    struct cli_command *parent, char *command,
+    int (*callback)(struct cli_def *cli, char *, char **, int),
+    int privilege, int mode, char *help)
+{
+    struct cli_command *c;
+    struct cli_command *result;
+
+    if (!command) return NULL;
+    if (!(c = calloc(sizeof(struct cli_command), 1))) return NULL;
+
+    c->stdargc = 0; // Use libcli argc, i.e. command name does not count in argc.
+
+    result = cli_register_command_impl(cli, parent, command, callback, privilege, mode,
+                                       help, c);
+
+    return result;
+}
+
+
 
 static void cli_free_command(struct cli_command *cmd)
 {
@@ -914,8 +977,17 @@ static int cli_find_command(struct cli_def *cli, struct cli_command *commands, i
                 }
             }
 
-            if (rc == CLI_OK)
-                rc = c->callback(cli, cli_command_name(cli, c), words + start_word + 1, c_words - start_word - 1);
+            if (rc == CLI_OK) {
+                if (c->stdargc) {
+                    rc = c->callback(cli, cli_command_name(cli, c),
+                                     words + start_word,
+                                     c_words - start_word);
+                } else {
+                    rc = c->callback(cli, cli_command_name(cli, c),
+                                     words + start_word + 1,
+                                     c_words - start_word - 1);
+                }
+            }
 
             while (cli->filters)
             {
@@ -927,6 +999,11 @@ static int cli_find_command(struct cli_def *cli, struct cli_command *commands, i
                 free(filt);
             }
 
+            if (rc == CLI_OK) {
+                cli_print(cli, "\nOK");
+            } else {
+                cli_print(cli, "\nERROR: %d (%s)", rc, cli_rc_to_str(rc));
+            }
             return rc;
         }
         else if (cli->mode > MODE_CONFIG && c->mode == MODE_CONFIG)
@@ -1104,8 +1181,8 @@ static int pass_matches(char *pass, char *try)
     /*
      * TODO - find a small crypt(3) function for use on windows
      */
-    if (des || !strncmp(pass, MD5_PREFIX, sizeof(MD5_PREFIX)-1))
-        try = crypt(try, pass);
+    //if (des || !strncmp(pass, MD5_PREFIX, sizeof(MD5_PREFIX)-1))
+    //    try = crypt(try, pass);
 #endif
 
     return !strcmp(pass, try);
@@ -1125,7 +1202,7 @@ static int show_prompt(struct cli_def *cli, int sockfd)
 
     return len + write(sockfd, cli->promptchar, strlen(cli->promptchar));
 }
-
+#ifndef CLI_NB_ST
 int cli_loop(struct cli_def *cli, int sockfd)
 {
     unsigned char c;
@@ -1881,6 +1958,874 @@ int cli_loop(struct cli_def *cli, int sockfd)
     cli->client = 0;
     return CLI_OK;
 }
+#else
+int cli_process_event(struct cli_def *cli)
+{
+    ccrContParam = &cli->z;
+
+    ccrBeginContext;
+    unsigned char c;
+    int n;
+    int l;
+    int oldl;
+    int is_telnet_option;
+    int skip;
+    int esc;
+    int cursor;
+    int insertmode;
+    char *cmd;
+    char *oldcmd;
+    char *username;
+    char *password;
+    char *negotiate;
+    ssize_t nwritten;
+    ssize_t nwanted;
+    signed int in_history;
+    int lastchar;
+    ccrEndContext(ccrs); // ccrs; Concurrent Co-Routine State
+
+
+    int retval = CLI_UNINITIALIZED;
+    ccrBegin(ccrs);
+    cli->callback_only_on_fd_readable = 0;
+    /* fprintf(stdout, "F: %s, L: %d, Got revents, EV_READ: %d, EV_WRITE: %d\n", */
+    /*         __FILE__, */
+    /*         __LINE__, */
+    /*         revents & EV_READ, */
+    /*         revents & EV_WRITE); */
+
+    ccrs->oldl = 0;
+    ccrs->is_telnet_option = 0;
+    ccrs->skip = 0;
+    ccrs->esc = 0;
+    ccrs->cursor = 0;
+    ccrs->insertmode = 1;
+    ccrs->cmd = NULL;
+    ccrs->oldcmd = 0;
+    ccrs->username = NULL;
+    ccrs->password = NULL;
+    ccrs->negotiate = strdup(
+        "\xFF\xFB\x03"
+        "\xFF\xFB\x01"
+        "\xFF\xFD\x03"
+        "\xFF\xFD\x01");
+    if (!ccrs->negotiate) {
+        return CLI_QUIT;
+    }
+
+    ccrs->nwanted = 0;
+    ccrs->nwritten = 0;
+
+    cli_build_shortest(cli, cli->commands);
+    cli->state = STATE_LOGIN;
+
+    cli_free_history(cli);
+
+
+    ccrs->nwanted = strlen(ccrs->negotiate);
+    ccrs->nwritten = write(cli->fd, ccrs->negotiate, ccrs->nwanted);
+
+    if (ccrs->nwritten < 0) {
+        if (errno != EWOULDBLOCK) {
+            perror("Unknown error");
+            assert(0);
+        } else {
+            fprintf(stderr, "Error, write would have blocked\n");
+            assert(0);
+        }
+    } else if (ccrs->nwritten < ccrs->nwanted) {
+        fprintf(stderr, "Error, only partial write. nritten %ld, nwanted %ld\n",
+                (long int)ccrs->nwritten, (long int)ccrs->nwanted);
+        assert(0);
+    }
+
+    ccrReturn(CLI_OK);
+    /* fprintf(stdout, "F: %s, L: %d, Got revents, EV_READ: %d, EV_WRITE: %d\n", */
+    /*         __FILE__, */
+    /*         __LINE__, */
+    /*         revents & EV_READ, */
+    /*         revents & EV_WRITE); */
+
+    if ((ccrs->cmd = malloc(CLI_MAX_LINE_LENGTH)) == NULL) {
+        return CLI_QUIT;
+    }
+
+
+#ifdef WIN32
+    /*
+     * OMG, HACK
+     */
+    if (!(cli->client = fdopen(_open_osfhandle(cli->fd,0), "w+")))
+        ccrReturn(CLI_QUIT);
+    cli->client->_file = cli->fd;
+#else
+    if (!(cli->client = fdopen(cli->fd, "w+")))
+        ccrReturn(CLI_QUIT);
+#endif
+
+    setbuf(cli->client, NULL);
+    if (cli->banner)
+        cli_error(cli, "%s", cli->banner);
+
+    // Set the last action now so we don't time immediately
+    if (cli->idle_timeout)
+        time(&cli->last_action);
+
+    /* start off in unprivileged mode */
+    cli_set_privilege(cli, PRIVILEGE_UNPRIVILEGED);
+    cli_set_configmode(cli, MODE_EXEC, NULL);
+
+    /* no auth required? */
+    if (!cli->users && !cli->auth_callback)
+        cli->state = STATE_NORMAL;
+
+    while (1) // Outer while(1) loop
+    {
+        ccrReturn(CLI_OK); // General yield, catches all breaks and
+                           // continues that end up here
+
+        /* fprintf(stdout, "(outer while()) F: %s, L: %d, Got revents, EV_READ: %d, EV_WRITE: %d\n", */
+        /*     __FILE__, */
+        /*     __LINE__, */
+        /*     revents & EV_READ, */
+        /*     revents & EV_WRITE); */
+
+
+        ccrs->in_history = 0;
+        ccrs->lastchar = 0;
+
+        cli->showprompt = 1;
+
+        if (ccrs->oldcmd)
+        {
+            ccrs->l = ccrs->cursor = ccrs->oldl;
+            ccrs->oldcmd[ccrs->l] = 0;
+            cli->showprompt = 1;
+            ccrs->oldcmd = NULL;
+            ccrs->oldl = 0;
+        }
+        else
+        {
+            memset(ccrs->cmd, 0, CLI_MAX_LINE_LENGTH);
+            ccrs->l = 0;
+            ccrs->cursor = 0;
+        }
+
+        //memcpy(&tm, &cli->timeout_tm, sizeof(tm));
+
+        while (1) // Inner while(1) loop
+        {
+            ccrReturn(CLI_OK); // General yield, will yield after all
+                               // continue statements that take us here
+
+            /* fprintf(stdout, "(inner while()) F: %s, L: %d, Got revents, " */
+            /*         "EV_READ: %d, EV_WRITE: %d\n", */
+            /*         __FILE__, */
+            /*         __LINE__, */
+            /*         revents & EV_READ, */
+            /*         revents & EV_WRITE); */
+
+            if (cli->showprompt)
+            {
+                if (cli->state != STATE_PASSWORD && cli->state != STATE_ENABLE_PASSWORD)
+                    write(cli->fd, "\r\n", 2);
+
+                switch (cli->state)
+                {
+                    case STATE_LOGIN:
+                        write(cli->fd, "Username: ", strlen("Username: "));
+                        break;
+
+                    case STATE_PASSWORD:
+                        write(cli->fd, "Password: ", strlen("Password: "));
+                        break;
+
+                    case STATE_NORMAL:
+                    case STATE_ENABLE:
+                        show_prompt(cli, cli->fd);
+                        write(cli->fd, ccrs->cmd, ccrs->l);
+                        if (ccrs->cursor < ccrs->l)
+                        {
+                            int n = ccrs->l - ccrs->cursor;
+                            while (n--)
+                                write(cli->fd, "\b", 1);
+                        }
+                        break;
+
+                    case STATE_ENABLE_PASSWORD:
+                        write(cli->fd, "Password: ", strlen("Password: "));
+                        break;
+
+                }
+
+                cli->showprompt = 0;
+                ccrReturn(CLI_OK); // yield...
+            }
+
+
+            cli->callback_only_on_fd_readable = 1;
+            if ((cli->revents & EV_READ) == 0) {
+                ccrReturn(CLI_OK);
+            }
+
+            if ((ccrs->n = read(cli->fd, &ccrs->c, 1)) < 0)
+            {
+                if (errno == EINTR) // Interrupted by signal
+                    continue;
+
+                perror("read");
+                ccrs->l = -1;
+                ccrReturn(CLI_QUIT);
+            }
+
+            cli->callback_only_on_fd_readable = 0;
+
+            //if (cli->idle_timeout)
+            //    time(&cli->last_action);
+
+            if (ccrs->n == 0)
+            {
+                ccrs->l = -1;
+                printf("Setting retval to %d\n", CLI_QUIT);
+                retval = CLI_QUIT;
+                goto CCR_FINISH;
+            }
+
+            if (ccrs->skip)
+            {
+                ccrs->skip--;
+                continue;
+            }
+
+            if (ccrs->c == 255 && !ccrs->is_telnet_option)
+            {
+                ccrs->is_telnet_option++;
+                continue;
+            }
+
+            if (ccrs->is_telnet_option)
+            {
+                if (ccrs->c >= 251 && ccrs->c <= 254)
+                {
+                    ccrs->is_telnet_option = ccrs->c;
+                    continue;
+                }
+
+                if (ccrs->c != 255)
+                {
+                    ccrs->is_telnet_option = 0;
+                    continue;
+                }
+
+                ccrs->is_telnet_option = 0;
+            }
+
+            /* handle ANSI arrows */
+            if (ccrs->esc)
+            {
+                if (ccrs->esc == '[')
+                {
+                    /* remap to readline control codes */
+                    switch (ccrs->c)
+                    {
+                        case 'A': /* Up */
+                            ccrs->c = CTRL('P');
+                            break;
+
+                        case 'B': /* Down */
+                            ccrs->c = CTRL('N');
+                            break;
+
+                        case 'C': /* Right */
+                            ccrs->c = CTRL('F');
+                            break;
+
+                        case 'D': /* Left */
+                            ccrs->c = CTRL('B');
+                            break;
+
+                        default:
+                            ccrs->c = 0;
+                    }
+
+                    ccrs->esc = 0;
+                }
+                else
+                {
+                    ccrs->esc = (ccrs->c == '[') ? ccrs->c : 0;
+                    continue;
+                }
+            }
+
+            if (ccrs->c == 0) continue;
+            if (ccrs->c == '\n') continue;
+
+            if (ccrs->c == '\r')
+            {
+                if (cli->state != STATE_PASSWORD &&
+                    cli->state != STATE_ENABLE_PASSWORD)
+                {
+                    write(cli->fd, "\r\n", 2);
+                }
+                break;
+            }
+
+            if (ccrs->c == 27)
+            {
+                ccrs->esc = 1;
+                continue;
+            }
+
+            if (ccrs->c == CTRL('C'))
+            {
+                write(cli->fd, "\a", 1);
+                continue;
+            }
+
+            /* back word, backspace/delete */
+            if (ccrs->c == CTRL('W') || ccrs->c == CTRL('H') || ccrs->c == 0x7f)
+            {
+                int back = 0;
+
+                if (ccrs->c == CTRL('W')) /* word */
+                {
+                    int nc = ccrs->cursor;
+
+                    if (ccrs->l == 0 || ccrs->cursor == 0)
+                        continue;
+
+                    while (nc && ccrs->cmd[nc - 1] == ' ')
+                    {
+                        nc--;
+                        back++;
+                    }
+
+                    while (nc && ccrs->cmd[nc - 1] != ' ')
+                    {
+                        nc--;
+                        back++;
+                    }
+                }
+                else /* char */
+                {
+                    if (ccrs->l == 0 || ccrs->cursor == 0)
+                    {
+                        write(cli->fd, "\a", 1); // alert (BEL) character
+                        continue;
+                    }
+
+                    back = 1;
+                }
+
+                if (back)
+                {
+                    while (back--)
+                    {
+                        if (ccrs->l == ccrs->cursor)
+                        {
+                            ccrs->cmd[--ccrs->cursor] = 0;
+                            if (cli->state != STATE_PASSWORD &&
+                                cli->state != STATE_ENABLE_PASSWORD)
+                            {
+                                write(cli->fd, "\b \b", 3);
+                            }
+                        }
+                        else
+                        {
+                            int i;
+                            ccrs->cursor--;
+                            if (cli->state != STATE_PASSWORD &&
+                                cli->state != STATE_ENABLE_PASSWORD)
+                            {
+                                for (i = ccrs->cursor; i <= ccrs->l; i++) {
+                                    ccrs->cmd[i] = ccrs->cmd[i+1];
+                                }
+                                write(cli->fd, "\b", 1);
+                                write(cli->fd, ccrs->cmd + ccrs->cursor,
+                                      strlen(ccrs->cmd + ccrs->cursor));
+                                write(cli->fd, " ", 1);
+                                for (i = 0; i <=
+                                         (int)strlen(ccrs->cmd + ccrs->cursor);
+                                     i++)
+                                {
+                                    write(cli->fd, "\b", 1);
+                                }
+                            }
+                        }
+                        ccrs->l--;
+                    }
+
+                    continue;
+                }
+            }
+
+            /* redraw */
+            if (ccrs->c == CTRL('L'))
+            {
+                int i;
+                int cursorback = ccrs->l - ccrs->cursor;
+
+                if (cli->state == STATE_PASSWORD ||
+                    cli->state == STATE_ENABLE_PASSWORD)
+                {
+                    continue;
+                }
+                write(cli->fd, "\r\n", 2);
+                show_prompt(cli, cli->fd);
+                write(cli->fd, ccrs->cmd, ccrs->l);
+
+                for (i = 0; i < cursorback; i++)
+                    write(cli->fd, "\b", 1);
+
+                continue;
+            }
+
+            /* clear line */
+            if (ccrs->c == CTRL('U'))
+            {
+                if (cli->state == STATE_PASSWORD ||
+                    cli->state == STATE_ENABLE_PASSWORD)
+                {
+                    memset(ccrs->cmd, 0, ccrs->l);
+                } else {
+                    cli_clear_line(cli->fd, ccrs->cmd, ccrs->l, ccrs->cursor);
+                }
+                ccrs->l = ccrs->cursor = 0;
+                continue;
+            }
+
+            /* kill to EOL */
+            if (ccrs->c == CTRL('K'))
+            {
+                if (ccrs->cursor == ccrs->l)
+                    continue;
+
+                if (cli->state != STATE_PASSWORD &&
+                    cli->state != STATE_ENABLE_PASSWORD)
+                {
+                    int c; // Dangerous, same name, different var...
+                    for (c = ccrs->cursor; c < ccrs->l; c++)
+                        write(cli->fd, " ", 1);
+
+                    for (c = ccrs->cursor; c < ccrs->l; c++)
+                        write(cli->fd, "\b", 1);
+                }
+
+                memset(ccrs->cmd + ccrs->cursor, 0, ccrs->l - ccrs->cursor);
+                ccrs->l = ccrs->cursor;
+                continue;
+            }
+
+            /* EOT */
+            if (ccrs->c == CTRL('D'))
+            {
+                if (cli->state == STATE_PASSWORD ||
+                    cli->state == STATE_ENABLE_PASSWORD)
+                {
+                    break;
+                }
+
+                if (ccrs->l)
+                    continue;
+
+                ccrs->l = -1;
+                break;
+            }
+
+            /* disable */
+            if (ccrs->c == CTRL('Z'))
+            {
+                if (cli->mode != MODE_EXEC)
+                {
+                    cli_clear_line(cli->fd, ccrs->cmd, ccrs->l, ccrs->cursor);
+                    cli_set_configmode(cli, MODE_EXEC, NULL);
+                    cli->showprompt = 1;
+                }
+
+                continue;
+            }
+
+            /* TAB completion */
+            if (ccrs->c == CTRL('I'))
+            {
+                char *completions[CLI_MAX_LINE_WORDS];
+                int num_completions = 0;
+
+                if (cli->state == STATE_LOGIN ||
+                    cli->state == STATE_PASSWORD ||
+                    cli->state == STATE_ENABLE_PASSWORD)
+                {
+                    continue;
+                }
+
+                if (ccrs->cursor != ccrs->l)
+                    continue;
+
+                num_completions = cli_get_completions(cli, ccrs->cmd, completions,
+                                                      CLI_MAX_LINE_WORDS);
+                if (num_completions == 0)
+                {
+                    write(cli->fd, "\a", 1);
+                }
+                else if (num_completions == 1)
+                {
+                    // Single completion
+                    for (; ccrs->l > 0; ccrs->l--, ccrs->cursor--)
+                    {
+                        if (ccrs->cmd[ccrs->l-1] == ' ' ||
+                            ccrs->cmd[ccrs->l-1] == '|')
+                        {
+                            break;
+                        }
+                        write(cli->fd, "\b", 1);
+                    }
+                    strcpy((ccrs->cmd + ccrs->l), completions[0]);
+                    ccrs->l += strlen(completions[0]);
+                    ccrs->cmd[ccrs->l++] = ' ';
+                    ccrs->cursor = ccrs->l;
+                    write(cli->fd, completions[0], strlen(completions[0]));
+                    write(cli->fd, " ", 1);
+                }
+                else if (ccrs->lastchar == CTRL('I'))
+                {
+                    // double tab
+                    int i;
+                    write(cli->fd, "\r\n", 2);
+                    for (i = 0; i < num_completions; i++)
+                    {
+                        write(cli->fd, completions[i], strlen(completions[i]));
+                        if (i % 4 == 3)
+                            write(cli->fd, "\r\n", 2);
+                        else
+                            write(cli->fd, "     ", 1);
+                    }
+                    if (i % 4 != 3) write(cli->fd, "\r\n", 2);
+                        cli->showprompt = 1;
+                }
+                else
+                {
+                    // More than one completion
+                    ccrs->lastchar = ccrs->c;
+                    write(cli->fd, "\a", 1);
+                }
+                continue;
+            }
+
+            /* history */
+            if (ccrs->c == CTRL('P') || ccrs->c == CTRL('N'))
+            {
+                int history_found = 0;
+
+                if (cli->state == STATE_LOGIN ||
+                    cli->state == STATE_PASSWORD ||
+                    cli->state == STATE_ENABLE_PASSWORD)
+                {
+                    continue;
+                }
+
+                if (ccrs->c == CTRL('P')) // Up
+                {
+                    ccrs->in_history--;
+                    if (ccrs->in_history < 0)
+                    {
+                        for (ccrs->in_history = MAX_HISTORY-1; ccrs->in_history >= 0;
+                             ccrs->in_history--)
+                        {
+                            if (cli->history[ccrs->in_history])
+                            {
+                                history_found = 1;
+                                break;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        if (cli->history[ccrs->in_history]) history_found = 1;
+                    }
+                }
+                else // Down
+                {
+                    ccrs->in_history++;
+                    if (ccrs->in_history >= MAX_HISTORY || !cli->history[ccrs->in_history])
+                    {
+                        int i = 0;
+                        for (i = 0; i < MAX_HISTORY; i++)
+                        {
+                            if (cli->history[i])
+                            {
+                                ccrs->in_history = i;
+                                history_found = 1;
+                                break;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        if (cli->history[ccrs->in_history]) history_found = 1;
+                    }
+                }
+                if (history_found && cli->history[ccrs->in_history])
+                {
+                    // Show history item
+                    cli_clear_line(cli->fd, ccrs->cmd, ccrs->l, ccrs->cursor);
+                    memset(ccrs->cmd, 0, CLI_MAX_LINE_LENGTH);
+                    strncpy(ccrs->cmd, cli->history[ccrs->in_history], CLI_MAX_LINE_LENGTH - 1);
+                    ccrs->l = ccrs->cursor = strlen(ccrs->cmd);
+                    write(cli->fd, ccrs->cmd, ccrs->l);
+                }
+
+                continue;
+            }
+
+            /* left/right cursor motion */
+            if (ccrs->c == CTRL('B') || ccrs->c == CTRL('F'))
+            {
+                if (ccrs->c == CTRL('B')) /* Left */
+                {
+                    if (ccrs->cursor)
+                    {
+                        if (cli->state != STATE_PASSWORD && cli->state != STATE_ENABLE_PASSWORD)
+                            write(cli->fd, "\b", 1);
+
+                        ccrs->cursor--;
+                    }
+                }
+                else /* Right */
+                {
+                    if (ccrs->cursor < ccrs->l)
+                    {
+                        if (cli->state != STATE_PASSWORD && cli->state != STATE_ENABLE_PASSWORD)
+                            write(cli->fd, &ccrs->cmd[ccrs->cursor], 1);
+
+                        ccrs->cursor++;
+                    }
+                }
+
+                continue;
+            }
+
+            /* start of line */
+            if (ccrs->c == CTRL('A'))
+            {
+                if (ccrs->cursor)
+                {
+                    if (cli->state != STATE_PASSWORD && cli->state != STATE_ENABLE_PASSWORD)
+                    {
+                        write(cli->fd, "\r", 1);
+                        show_prompt(cli, cli->fd);
+                    }
+
+                    ccrs->cursor = 0;
+                }
+
+                continue;
+            }
+
+            /* end of line */
+            if (ccrs->c == CTRL('E'))
+            {
+                if (ccrs->cursor < ccrs->l)
+                {
+                    if (cli->state != STATE_PASSWORD && cli->state != STATE_ENABLE_PASSWORD)
+                        write(cli->fd, &ccrs->cmd[ccrs->cursor], ccrs->l - ccrs->cursor);
+
+                    ccrs->cursor = ccrs->l;
+                }
+
+                continue;
+            }
+
+            /* normal character typed */
+            if (ccrs->cursor == ccrs->l)
+            {
+                 /* append to end of line */
+                ccrs->cmd[ccrs->cursor] = ccrs->c;
+                if (ccrs->l < CLI_MAX_LINE_LENGTH - 1)
+                {
+                    ccrs->l++;
+                    ccrs->cursor++;
+                }
+                else
+                {
+                    write(cli->fd, "\a", 1);
+                    continue;
+                }
+            }
+            else
+            {
+                // Middle of text
+                if (ccrs->insertmode)
+                {
+                    int i;
+                    // Move everything one character to the right
+                    if (ccrs->l >= CLI_MAX_LINE_LENGTH - 2) ccrs->l--;
+                    for (i = ccrs->l; i >= ccrs->cursor; i--)
+                        ccrs->cmd[i + 1] = ccrs->cmd[i];
+                    // Write what we've just added
+                    ccrs->cmd[ccrs->cursor] = ccrs->c;
+
+                    write(cli->fd, &ccrs->cmd[ccrs->cursor], ccrs->l - ccrs->cursor + 1);
+                    for (i = 0; i < (ccrs->l - ccrs->cursor + 1); i++)
+                        write(cli->fd, "\b", 1);
+                    ccrs->l++;
+                }
+                else
+                {
+                    ccrs->cmd[ccrs->cursor] = ccrs->c;
+                }
+                ccrs->cursor++;
+            }
+
+            if (cli->state != STATE_PASSWORD && cli->state != STATE_ENABLE_PASSWORD)
+            {
+                if (ccrs->c == '?' && ccrs->cursor == ccrs->l)
+                {
+                    write(cli->fd, "\r\n", 2);
+                    ccrs->oldcmd = ccrs->cmd;
+                    ccrs->oldl = ccrs->cursor = ccrs->l - 1;
+                    break;
+                }
+                write(cli->fd, &ccrs->c, 1);
+            }
+
+            ccrs->oldcmd = 0;
+            ccrs->oldl = 0;
+            ccrs->lastchar = ccrs->c;
+        } // End of inner while(1) loop
+
+        if (ccrs->l < 0) break;
+
+        if (cli->state == STATE_LOGIN)
+        {
+            if (ccrs->l == 0) continue;
+
+            /* require login */
+            free_z(ccrs->username);
+            if (!(ccrs->username = strdup(ccrs->cmd))) {
+                return CLI_QUIT;
+            }
+            cli->state = STATE_PASSWORD;
+            cli->showprompt = 1;
+        }
+        else if (cli->state == STATE_PASSWORD)
+        {
+            /* require password */
+            int allowed = 0;
+
+            free_z(ccrs->password);
+            if (!(ccrs->password = strdup(ccrs->cmd))) {
+                  ccrReturn(CLI_QUIT);
+            }
+            if (cli->auth_callback)
+            {
+                if (cli->auth_callback(ccrs->username, ccrs->password) == CLI_OK)
+                    allowed++;
+            }
+
+            if (!allowed)
+            {
+                struct unp *u;
+                for (u = cli->users; u; u = u->next)
+                {
+                    if (!strcmp(u->username, ccrs->username) &&
+                        pass_matches(u->password, ccrs->password))
+                    {
+                        allowed++;
+                        break;
+                    }
+                }
+            }
+
+            if (allowed)
+            {
+                cli_error(cli, "%s", "");
+                cli->state = STATE_NORMAL;
+            }
+            else
+            {
+                cli_error(cli, "\n\nAccess denied");
+                free_z(ccrs->username);
+                free_z(ccrs->password);
+                cli->state = STATE_LOGIN;
+            }
+
+            cli->showprompt = 1;
+        }
+        else if (cli->state == STATE_ENABLE_PASSWORD)
+        {
+            int allowed = 0;
+            if (cli->enable_password)
+            {
+                /* check stored static enable password */
+                if (pass_matches(cli->enable_password, ccrs->cmd))
+                    allowed++;
+            }
+
+            if (!allowed && cli->enable_callback)
+            {
+                /* check callback */
+                if (cli->enable_callback(ccrs->cmd))
+                    allowed++;
+            }
+
+            if (allowed)
+            {
+                cli->state = STATE_ENABLE;
+                cli_set_privilege(cli, PRIVILEGE_PRIVILEGED);
+            }
+            else
+            {
+                cli_error(cli, "\n\nAccess denied");
+                cli->state = STATE_NORMAL;
+            }
+        }
+        else
+        {
+            if (ccrs->l == 0) continue;
+            if (ccrs->cmd[ccrs->l - 1] != '?' &&
+                strcasecmp(ccrs->cmd, "history") != 0)
+            {
+                retval = cli_add_history(cli, ccrs->cmd);
+                if (retval != CLI_OK) {
+                    break;
+                }
+            }
+            if (cli_run_command(cli, ccrs->cmd) == CLI_QUIT) {
+                fprintf(stderr, "cli_run_command() returned CLI_QUIT\n");
+                retval = CLI_QUIT;
+                break;
+            }
+        }
+
+        // Update the last_action time now as the last command run could take a
+        // long time to return
+        if (cli->idle_timeout)
+            time(&cli->last_action);
+    } // End of outer while(1) loop
+
+    cli_free_history(cli);
+    free_z(ccrs->username);
+    free_z(ccrs->password);
+    free_z(ccrs->cmd);
+
+    fclose(cli->client);
+    cli->client = 0;
+    if (retval == CLI_UNINITIALIZED) {
+        fprintf(stderr, "Got to end of cli processing, "
+               "retval was CLI_UNINITIALIZED...\n");
+        retval = CLI_QUIT;
+    }
+
+CCR_FINISH:
+    assert(retval != CLI_UNINITIALIZED);
+    printf("Calling ccrFinish(), retval %d\n", retval);
+    if (ccrs->negotiate) {
+        free(ccrs->negotiate);
+        ccrs->negotiate = NULL;
+    }
+    ccrFinish(retval);
+}
+#endif // CLI_NB_ST
 
 int cli_file(struct cli_def *cli, FILE *fh, int privilege, int mode)
 {
@@ -1954,6 +2899,9 @@ static void _print(struct cli_def *cli, int print_mode, char *format, va_list ap
         return;
 
     p = cli->buffer;
+
+    size_t slen = strlen(p);
+
     do
     {
         char *next = strchr(p, '\n');
@@ -1979,7 +2927,7 @@ static void _print(struct cli_def *cli, int print_mode, char *format, va_list ap
         }
 
         p = next;
-    } while (p);
+    } while (p && (p < cli->buffer + slen));
 
     if (p && *p)
     {
