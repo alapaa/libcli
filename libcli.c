@@ -415,8 +415,7 @@ struct cli_command *cli_register_command_impl(struct cli_def *cli,
 struct cli_command *cli_register_command_sargc(struct cli_def *cli,
     struct cli_command *parent, char *command,
     int (*callback)(struct cli_def *cli, char *, char **, int),
-    int privilege, int mode, char *help,
-    unsigned char staticstr)
+    int privilege, int mode, char *help)
 {
     struct cli_command *c;
     struct cli_command *result;
@@ -425,12 +424,6 @@ struct cli_command *cli_register_command_sargc(struct cli_def *cli,
     if (!(c = calloc(sizeof(struct cli_command), 1))) return NULL;
 
     c->stdargc = 1; // Use standard argc, i.e. command name counts in argc.
-    if (staticstr) {
-        c->staticstr = 1;
-    } else {
-        c->staticstr = 0;
-    }
-
 
     result = cli_register_command_impl(cli, parent, command, callback, privilege, mode,
                                        help, c);
@@ -470,8 +463,8 @@ static void cli_free_command(struct cli_command *cmd)
         c = p;
     }
 
-    if (!cmd->staticstr) free(cmd->command);
-    if (!cmd->staticstr && cmd->help) free(cmd->help);
+    free(cmd->command);
+    if (cmd->help) free(cmd->help);
     free(cmd);
 }
 
@@ -649,8 +642,6 @@ void cli_unregister_all(struct cli_def *cli, struct cli_command *command)
     for (c = command; c; )
     {
         p = c->next;
-        if (c->command) free(c->command);
-        if (c->help) free(c->help);
 
         // Unregister all child commands
         if (c->children)

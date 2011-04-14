@@ -129,9 +129,6 @@ struct cli_command {
     int mode;
     unsigned char stdargc; // True if callback wants argc to count command name
     unsigned int unique_len;
-    unsigned char staticstr; // Set to true if user does not want cleanup of
-                             // command and help strings (i.e. if they are not
-                             // malloc:ed in the first place).
     struct cli_command *next;
     struct cli_command *children;
     struct cli_command *parent;
@@ -204,11 +201,14 @@ struct cli_command *cli_register_command(
  * Same as cli_register_command, but tells libcli to use standard argc,
  * i.e. count command name in argc.
  */
-struct cli_command *cli_register_command_sargc(struct cli_def *cli,
-    struct cli_command *parent, char *command,
-    int (*callback)(struct cli_def *cli, char *, char **, int),
-    int privilege, int mode, char *help,
-    unsigned char staticstr);
+struct cli_command *cli_register_command_sargc(
+    struct cli_def *cli,
+    struct cli_command *parent,
+    char *command,
+    int (*callback)(struct cli_def *, char *, char **, int),
+    int privilege,
+    int mode,
+    char *help);
 
 /*
  * Remove a command and all children.  There is not provision yet for removing
