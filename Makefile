@@ -29,14 +29,20 @@ LIBS = -lcrypt
 endif
 
 all: $(LIB) clitest libcli.a
-
+ifdef BUILD_NB_ST
+$(LIB): libcli.o elog.o libcli_wrapper.o iputils.o sysutils.o cli_cmd.o
+	$(CC) -o $(LIB).$(MAJOR).$(MINOR).$(REVISION) $^ $(LDFLAGS) $(LIBS)
+	-rm -f $(LIB) $(LIB).$(MAJOR).$(MINOR)
+	ln -s $(LIB).$(MAJOR).$(MINOR).$(REVISION) $(LIB).$(MAJOR).$(MINOR)
+	ln -s $(LIB).$(MAJOR).$(MINOR) $(LIB)
+else
 $(LIB): libcli.o
 	$(CC) -o $(LIB).$(MAJOR).$(MINOR).$(REVISION) $^ $(LDFLAGS) $(LIBS)
 	-rm -f $(LIB) $(LIB).$(MAJOR).$(MINOR)
 	ln -s $(LIB).$(MAJOR).$(MINOR).$(REVISION) $(LIB).$(MAJOR).$(MINOR)
 	ln -s $(LIB).$(MAJOR).$(MINOR) $(LIB)
-
-libcli.a: libcli.o
+endif
+libcli.a: elog.o libcli.o libcli_wrapper.o iputils.o sysutils.o cli_cmd.o
 	ar r $@ $^
 
 %.o: %.c
@@ -45,8 +51,8 @@ libcli.a: libcli.o
 libcli.o: libcli.h
 
 ifdef BUILD_NB_ST
-clitest: clitest_nbst.o $(LIB) libcli.a libcli.h
-	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $< -L. libcli.a -lcrypt -lev
+clitest:  clitest_nbst.o libcli.a libcli.h
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $< -L. libcli.a -lev -lcrypt
 else
 clitest: clitest.o $(LIB) libcli.a libcli.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $<  -L. -lcli -lcrypt

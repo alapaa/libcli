@@ -22,11 +22,35 @@
 #ifndef WIN32
 #include <regex.h>
 #endif
+
+#include "elog.h"
 #include "libcli.h"
 
 #ifdef CLI_NB_ST
 #include "coroutine.h"
+
 #endif
+
+#define CCR_VAR_LIST     unsigned char c;       \
+    int n; \
+    int l; \
+    int oldl; \
+    int is_telnet_option; \
+    int skip; \
+    int esc; \
+    int cursor; \
+    int insertmode; \
+    char *cmd; \
+    char *oldcmd; \
+    char *username; \
+    char *password; \
+    char *negotiate; \
+    ssize_t nwritten; \
+    ssize_t nwanted; \
+    signed int in_history; \
+    int lastchar;
+
+
 
 // vim:sw=4 ts=8
 
@@ -255,14 +279,14 @@ void cli_deny_user(struct cli_def *cli, char *username)
     }
 }
 
-void cli_set_banner(struct cli_def *cli, char *banner)
+void cli_set_banner(struct cli_def *cli, const char *banner)
 {
     free_z(cli->banner);
     if (banner && *banner)
         cli->banner = strdup(banner);
 }
 
-void cli_set_hostname(struct cli_def *cli, char *hostname)
+void cli_set_hostname(struct cli_def *cli, const char *hostname)
 {
     free_z(cli->hostname);
     if (hostname && *hostname)
@@ -454,6 +478,7 @@ struct cli_command *cli_register_command(struct cli_def *cli,
 
 static void cli_free_command(struct cli_command *cmd)
 {
+    D("Entered %s", __FUNCTION__);
     struct cli_command *c,*p;
 
     for (c = cmd->children; c;)
@@ -463,8 +488,15 @@ static void cli_free_command(struct cli_command *cmd)
         c = p;
     }
 
-    free(cmd->command);
-    if (cmd->help) free(cmd->help);
+    if (cmd->command) {
+        free(cmd->command);
+        cmd->command = NULL;
+    }
+    if (cmd->help) {
+        free(cmd->help);
+        cmd->help = NULL;
+    }
+
     free(cmd);
 }
 
@@ -635,10 +667,12 @@ struct cli_def *cli_init()
 void cli_unregister_all(struct cli_def *cli, struct cli_command *command)
 {
     struct cli_command *c, *p = NULL;
+    D("Entered %s", __FUNCTION__);
 
     if (!command) command = cli->commands;
     if (!command) return;
 
+    D("Cmd: \'%s\'", command->command);
     for (c = command; c; )
     {
         p = c->next;
@@ -654,6 +688,41 @@ void cli_unregister_all(struct cli_def *cli, struct cli_command *command)
         c = p;
     }
 }
+
+#ifdef CLI_NB_ST
+void cli_cleanup_ccrs(ccrContext *z)
+{
+    D("Entered %s", __FUNCTION__);
+
+    if (*z) {
+        ccrContParam = z;
+        ccrBeginContext;
+        CCR_VAR_LIST
+        ccrEndContext(ccrs); // ccrs; Concurrent Co-Routine State
+
+        if (ccrs->cmd) {
+            free(ccrs->cmd);
+            ccrs->cmd = NULL;
+        }
+        if (ccrs->negotiate) {
+            free(ccrs->negotiate);
+            ccrs->negotiate = NULL;
+        }
+
+        if (ccrs->username) {
+            free(ccrs->username);
+            ccrs->username = NULL;
+        }
+        if (ccrs->password) {
+            free(ccrs->password);
+            ccrs->password = NULL;
+        }
+
+        free(ccrs);
+        *z = NULL;
+    }
+}
+#endif
 
 int cli_done(struct cli_def *cli)
 {
@@ -675,12 +744,18 @@ int cli_done(struct cli_def *cli)
     /* free all commands */
     cli_unregister_all(cli, 0);
 
+#ifdef CLI_NB_ST
+    cli_cleanup_ccrs(&cli->z);
+#endif
     free_z(cli->commandname);
     free_z(cli->modestring);
     free_z(cli->banner);
     free_z(cli->promptchar);
     free_z(cli->hostname);
     free_z(cli->buffer);
+    if (cli->client) {
+        fclose(cli->client);
+    }
     free_z(cli);
 
     return CLI_OK;
@@ -1959,29 +2034,13 @@ int cli_loop(struct cli_def *cli, int sockfd)
     return CLI_OK;
 }
 #else
+
 int cli_process_event(struct cli_def *cli)
 {
     ccrContParam = &cli->z;
 
     ccrBeginContext;
-    unsigned char c;
-    int n;
-    int l;
-    int oldl;
-    int is_telnet_option;
-    int skip;
-    int esc;
-    int cursor;
-    int insertmode;
-    char *cmd;
-    char *oldcmd;
-    char *username;
-    char *password;
-    char *negotiate;
-    ssize_t nwritten;
-    ssize_t nwanted;
-    signed int in_history;
-    int lastchar;
+    CCR_VAR_LIST
     ccrEndContext(ccrs); // ccrs; Concurrent Co-Routine State
 
 
@@ -2010,7 +2069,8 @@ int cli_process_event(struct cli_def *cli)
         "\xFF\xFD\x03"
         "\xFF\xFD\x01");
     if (!ccrs->negotiate) {
-        return CLI_QUIT;
+        retval = CLI_QUIT;
+        goto CCR_FINISH;
     }
 
     ccrs->nwanted = 0;
@@ -2047,7 +2107,8 @@ int cli_process_event(struct cli_def *cli)
     /*         revents & EV_WRITE); */
 
     if ((ccrs->cmd = malloc(CLI_MAX_LINE_LENGTH)) == NULL) {
-        return CLI_QUIT;
+        retval = CLI_QUIT;
+        goto CCR_FINISH;
     }
 
 
@@ -2186,7 +2247,6 @@ int cli_process_event(struct cli_def *cli)
             if (ccrs->n == 0)
             {
                 ccrs->l = -1;
-                printf("Setting retval to %d\n", CLI_QUIT);
                 retval = CLI_QUIT;
                 goto CCR_FINISH;
             }
@@ -2702,7 +2762,8 @@ int cli_process_event(struct cli_def *cli)
             /* require login */
             free_z(ccrs->username);
             if (!(ccrs->username = strdup(ccrs->cmd))) {
-                return CLI_QUIT;
+                retval = CLI_QUIT;
+                goto CCR_FINISH;
             }
             cli->state = STATE_PASSWORD;
             cli->showprompt = 1;
@@ -2818,12 +2879,7 @@ int cli_process_event(struct cli_def *cli)
 
 CCR_FINISH:
     assert(retval != CLI_UNINITIALIZED);
-    printf("Calling ccrFinish(), retval %d\n", retval);
-    if (ccrs->negotiate) {
-        free(ccrs->negotiate);
-        ccrs->negotiate = NULL;
-    }
-    ccrFinish(retval);
+    ccrFinishDontFreeCcrParam(retval); // ccr param and sub-mallocs freed elsewhere.
 }
 #endif // CLI_NB_ST
 

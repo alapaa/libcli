@@ -159,6 +159,7 @@
 #define ccrBegin(x)      if(!x) {x= *ccrParam=malloc(sizeof(*x)); x->ccrLine=0;}\
                          if (x) switch(x->ccrLine) { case 0:;
 #define ccrFinish(z)     } free(*ccrParam); *ccrParam=0; return (z)
+#define ccrFinishDontFreeCcrParam(z)     } return (z)
 #define ccrFinishV       } free(*ccrParam); *ccrParam=0; return
 
 #define ccrReturn(z)     \
