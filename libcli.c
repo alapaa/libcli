@@ -1180,6 +1180,11 @@ static int cli_get_completions(struct cli_def *cli, char *command, char **comple
                     completions[k++] = filter_cmds[i].cmd;
 
         completions[k] = NULL;
+        for (i = 0; i < CLI_MAX_LINE_WORDS; i++) {
+            if (words[i]) {
+                free(words[i]);
+            }
+        }
         return k;
     }
 
@@ -1207,6 +1212,12 @@ static int cli_get_completions(struct cli_def *cli, char *command, char **comple
         }
 
         completions[k++] = c->command;
+    }
+
+    for (i = 0; i < CLI_MAX_LINE_WORDS; i++) {
+        if (words[i]) {
+            free(words[i]);
+        }
     }
 
     return k;
