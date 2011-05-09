@@ -48,9 +48,7 @@
     ssize_t nwritten; \
     ssize_t nwanted; \
     signed int in_history; \
-    int lastchar;
-
-
+    int lastchar; \
 
 // vim:sw=4 ts=8
 
@@ -478,7 +476,7 @@ struct cli_command *cli_register_command(struct cli_def *cli,
 
 static void cli_free_command(struct cli_command *cmd)
 {
-    D("Entered %s", __FUNCTION__);
+    //D("Entered %s", __FUNCTION__);
     struct cli_command *c,*p;
 
     for (c = cmd->children; c;)
@@ -667,12 +665,12 @@ struct cli_def *cli_init()
 void cli_unregister_all(struct cli_def *cli, struct cli_command *command)
 {
     struct cli_command *c, *p = NULL;
-    D("Entered %s", __FUNCTION__);
+    //D("Entered %s", __FUNCTION__);
 
     if (!command) command = cli->commands;
     if (!command) return;
 
-    D("Cmd: \'%s\'", command->command);
+    //D("Cmd: \'%s\'", command->command);
     for (c = command; c; )
     {
         p = c->next;
@@ -692,7 +690,7 @@ void cli_unregister_all(struct cli_def *cli, struct cli_command *command)
 #ifdef CLI_NB_ST
 void cli_cleanup_ccrs(ccrContext *z)
 {
-    D("Entered %s", __FUNCTION__);
+    //D("Entered %s", __FUNCTION__);
 
     if (*z) {
         ccrContParam = z;
@@ -2532,8 +2530,9 @@ int cli_process_event(struct cli_def *cli)
                 if (ccrs->cursor != ccrs->l)
                     continue;
 
-                num_completions = cli_get_completions(cli, ccrs->cmd, completions,
-                                                      CLI_MAX_LINE_WORDS);
+                num_completions =
+                    cli_get_completions(cli, ccrs->cmd, completions,
+                                        CLI_MAX_LINE_WORDS);
                 if (num_completions == 0)
                 {
                     write(cli->fd, "\a", 1);
@@ -2564,7 +2563,8 @@ int cli_process_event(struct cli_def *cli)
                     write(cli->fd, "\r\n", 2);
                     for (i = 0; i < num_completions; i++)
                     {
-                        write(cli->fd, completions[i], strlen(completions[i]));
+                        write(cli->fd, completions[i],
+                              strlen(completions[i]));
                         if (i % 4 == 3)
                             write(cli->fd, "\r\n", 2);
                         else

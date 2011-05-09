@@ -79,7 +79,7 @@ static struct sock_ev_client* client_new(int fd, struct sock_ev_serv *server)
 
 static void client_del(UNUSED(EV_P_ ev_io *w), struct sock_ev_client **client)
 {
-    D("Entered %s", __FUNCTION__);
+    //D("Entered %s", __FUNCTION__);
 
     assert(client);
     assert(*client); /* Free of NULL is nominally OK, but we want to detect it */
@@ -128,7 +128,7 @@ static void clilist_cleanup_all(
     EV_P_ ev_io *w,
     struct sock_ev_serv *server)
 {
-    D("Entered %s. n_clients: %d\n", __FUNCTION__, server->n_clients);
+    //D("Entered %s. n_clients: %d\n", __FUNCTION__, server->n_clients);
 
     struct sock_ev_client *curr = server->client_list;
     struct sock_ev_client *next = NULL;
@@ -333,7 +333,7 @@ static int server_init(struct sock_ev_serv* server, int max_queue,
       return -1;
     }
 
-    D("Listening on port %s\n", port_str);
+    INFO("CLI: Listening on port %s\n", port_str);
 
     freeaddrinfo(servinfo);
 
@@ -342,11 +342,11 @@ static int server_init(struct sock_ev_serv* server, int max_queue,
 
 void cliwrap_cleanup(EV_P_ struct Cli **cli)
 {
-    D("Closing server fd");
+    //D("Closing server fd");
     close((*cli)->server->fd);
-    D("Cleaning up all remaining clients");
+    //D("Cleaning up all remaining clients");
     clilist_cleanup_all(EV_A_ &((*cli)->server)->io, (*cli)->server);
-    D("Stopping init_timer");
+    //D("Stopping init_timer");
     ev_timer_stop(EV_A_ &(*cli)->init_timer);
 
     free((*cli)->addr_str);
@@ -464,14 +464,12 @@ static void init_cb(EV_P_ ev_timer *w, UNUSED(int revents))
 
     ev_io_init(&cli->server->io, server_cb, cli->server->fd, EV_READ);
     ev_io_start(EV_A_ &cli->server->io);
-
-    INFO("CLI is up and running.");
 }
 
 struct Cli* cliwrap_init(EV_P_ const char *addr_str, const char *port_str,
                           int n_clients, void *udata)
 {
-    D("Entered %s\n", __FUNCTION__);
+    //D("Entered %s\n", __FUNCTION__);
     struct Cli* cli = calloc(1, sizeof(struct Cli));
 
     cli->server = calloc(1, sizeof(struct sock_ev_serv));
@@ -484,7 +482,7 @@ struct Cli* cliwrap_init(EV_P_ const char *addr_str, const char *port_str,
     cli->init_timer.data = cli;
     ev_timer_start(loop, &cli->init_timer);
 
-    D("Finished cliwrap_init()");
+    //D("Finished cliwrap_init()");
 
     return cli;
 
