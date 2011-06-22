@@ -240,8 +240,8 @@ static void server_cb( EV_P_ ev_io *w, UNUSED(int revents))
             inet_ntop(AF_INET6, &s->sin6_addr, ipstr, sizeof ipstr);
         }
 
-        INFO("Accepted CLI connection; Peer IP address: %s, peer port: %d\n",
-             ipstr, port);
+        /* INFO("Accepted CLI connection; Peer IP address: %s, peer port: %d\n", */
+        /*      ipstr, port); */
 
         client = client_new(client_fd, server);
         clilist_add_front(server, client);
@@ -289,7 +289,7 @@ static int socket_init(
     if ( (retval = getaddrinfo(addr_str, port_str, &hints, &servinfo)) != 0 ) {
         ERR("Failed to get listening address ([%s]:%s): %s",
              addr_str, port_str, gai_strerror(retval));
-        return 0;
+        return -1;
     }
 
     if ((fd = socket(servinfo->ai_family, servinfo->ai_socktype,
@@ -299,7 +299,7 @@ static int socket_init(
             strerror(errno));
         freeaddrinfo(servinfo);
         errno = 0;
-        return 0;
+        return -1;
     }
 
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
@@ -311,14 +311,24 @@ static int socket_init(
     }
 
     *ai = servinfo; /* Caller must do freeaddrinfo() */
+
+    assert(fd >= 0);
     return fd;
 }
 
 static int server_init(struct sock_ev_serv* server, int max_queue,
                        const char *addr_str, const char *port_str)
 {
-    struct addrinfo *servinfo;
+    struct addrinfo *servinfo = NULL;
     server->fd = socket_init(max_queue, addr_str, port_str, &servinfo);
+
+    if (server->fd < 0 || servinfo == NULL) {
+        ERR("socket_init on %s:%s failed, cannot do server_init",
+            (addr_str ? addr_str : "NULL"),
+            (port_str ? port_str : "NULL"));
+
+        return -1;
+    }
 
     if (bind(server->fd, servinfo->ai_addr, servinfo->ai_addrlen) == -1)
     {
